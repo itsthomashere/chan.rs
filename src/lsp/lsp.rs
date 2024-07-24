@@ -1,139 +1,132 @@
 use std::{
-    collections::HashMap, ffi::OsString, future::Future, path::PathBuf, pin::Pin, time::Duration,
+    collections::HashMap,
+    ffi::OsString,
+    path::PathBuf,
+    sync::{atomic::AtomicI32, Arc},
 };
 
+use anyhow::Result;
+use lsp_types::{CodeActionKind, ServerCapabilities};
+use parking_lot::{Mutex, RwLock};
 use serde::{Deserialize, Serialize};
 use serde_json::{value::RawValue, Value};
+use tokio::process::Child;
 
-const JSON_RPC_VERSION: &str = "2.0";
-const CONTENT_LEN_HEADER: &str = "";
-const LSP_REQ_TIMEOUT: Duration = Duration::from_secs(120);
-const SERVER_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(5);
+const JSON_RPC_VER: &str = "2.0";
+const content_length_headers: &str = "Content-Length: ";
 
-#[derive(Debug, Clone, Copy)]
-enum IoKind {
-    StdIn,
-    StdOut,
-    StdErr,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-pub struct LsBin {
-    path: PathBuf,
-    args: Vec<OsString>,
-    env: Option<HashMap<String, String>>,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
-#[repr(transparent)]
-pub struct LsId(pub usize);
-
-#[derive(Debug, Deserialize, Serialize)]
-pub struct LspError {
-    message: String,
-}
-
-// This section is implementation of Language server Protocol RPC
-//
-// To read more about specification: [LSP Specification](https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification)
-
-// For the request id
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Deserialize, Serialize)]
 #[serde(untagged)]
-pub enum RequestId {
+enum RequestIdType {
     Int(i32),
     Str(String),
 }
 
-// LSP Request
-//
-// Request message json format
-#[derive(Deserialize, Serialize)]
-pub struct Request<'a, T> {
-    jsonrpc: &'a str,
-    id: RequestId,
+#[derive(Serialize, Deserialize)]
+struct Request<'a, T> {
+    jsonrpc: &'static str,
+    id: RequestIdType,
     method: &'a str,
     params: T,
 }
 
-// The response before deserialize into proper format
-#[derive(Deserialize, Serialize)]
-pub struct AnyResponse<'a> {
-    jsonrpc: &'a str,
-    id: RequestId,
-    #[serde(default)]
-    error: Option<LspError>,
-    #[serde(borrow)]
-    results: Option<&'a RawValue>,
+#[derive(Debug, Deserialize, Serialize)]
+struct Error {
+    message: String,
 }
 
-// Helper for parsing result with either error or result value
 #[derive(Serialize)]
 #[serde(rename_all = "snake_case")]
 enum LspResult<T> {
     #[serde(rename = "result")]
     Ok(Option<T>),
-    Error(Option<LspError>),
+    Error(Option<Error>),
 }
 
-// LSP Response concrete format
-//
-// Response in json format
+#[derive(Deserialize, Serialize)]
+struct AnyResponse<'a> {
+    jsonrpc: &'a str,
+    id: RequestIdType,
+    #[serde(default)]
+    error: Option<Error>,
+    #[serde(borrow)]
+    result: Option<&'a RawValue>,
+}
+
 #[derive(Serialize)]
-pub struct Response<T> {
+struct Response<T> {
     jsonrpc: &'static str,
-    id: RequestId,
+    id: RequestIdType,
     #[serde(flatten)]
     value: LspResult<T>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
-pub struct AnyNotification {
+#[derive(Deserialize, Debug, Clone)]
+struct AnyNotification {
     #[serde(default)]
-    id: Option<RequestId>,
+    id: Option<RequestIdType>,
     method: String,
     #[serde(default)]
     params: Option<Value>,
 }
 
-// LSP Notification concrete format
-//
-// Notification in json
-#[derive(Deserialize, Serialize)]
-pub struct Notification<'a, T> {
-    jsonrpc: &'a str,
+#[derive(Serialize, Deserialize)]
+struct Notification<'a, T> {
+    jsonrpc: &'static str,
     #[serde(borrow)]
     method: &'a str,
     params: T,
 }
 
-pub trait LspRequestFuture<O>: Future<Output = O> {
-    fn id(&self) -> i32;
+// Defining basic language server
+//
+pub enum IoKind {
+    StdIn,
+    StdOut,
+    StdErr,
 }
 
-struct LspRequest<F> {
-    id: i32,
-    request: F,
+pub struct LanguageServerBin {
+    path: PathBuf,
+    env: Vec<OsString>,
+    args: Option<Vec<HashMap<String, String>>>,
 }
-impl<F> LspRequest<F> {
-    pub fn new(id: i32, request: F) -> Self {
-        Self { id, request }
-    }
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[repr(transparent)]
+pub struct LspId(pub usize);
+
+pub struct LanguageServer {
+    server_id: LspId,
+    next_id: AtomicI32,
+    name: Arc<str>,
+    capabilities: RwLock<ServerCapabilities>,
+    code_action_kinds: Option<Vec<CodeActionKind>>,
+    root_path: PathBuf,
+    working_dir: PathBuf,
+    // TODO: io_handlers
+    // TODO: response_handlers
+    // TODO: notification_handlers
+    // TODO: using channel to handle tasks
+    server: Arc<Mutex<Child>>,
 }
 
-impl<F: Future> Future for LspRequest<F> {
-    type Output = F::Output;
-
-    fn poll(
-        self: std::pin::Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<Self::Output> {
-        let inner = unsafe { Pin::new_unchecked(&mut self.get_unchecked_mut().request) };
-        inner.poll(cx)
-    }
+pub struct AdapterServerCapabilities {
+    pub server_capabilities: ServerCapabilities,
+    pub code_action_kinds: Option<Vec<CodeActionKind>>,
 }
-impl<F: Future> LspRequestFuture<F::Output> for LspRequest<F> {
-    fn id(&self) -> i32 {
-        self.id
+
+impl LanguageServer {
+    pub fn new() -> Result<Self> {
+        Ok(Self {
+            server_id: todo!(),
+            next_id: todo!(),
+            name: todo!(),
+            capabilities: todo!(),
+            code_action_kinds: todo!(),
+            root_path: todo!(),
+            working_dir: todo!(),
+            server: todo!(),
+        })
     }
+    pub fn initialize() -> {}
 }
