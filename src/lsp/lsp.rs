@@ -13,7 +13,12 @@ use serde_json::{value::RawValue, Value};
 use tokio::process::Child;
 
 const JSON_RPC_VER: &str = "2.0";
-const content_length_headers: &str = "Content-Length: ";
+const CONTENT_LENGTH_HEADERS: &str = "Content-Length: ";
+
+// TODO!: Adding appilcation context parser later on this
+type NotificationHandler = Box<dyn Send + FnMut(Option<RequestIdType>, Value)>;
+type ResponseHandler = Box<dyn Send + FnOnce(Result<String, Error>)>;
+type IoHandler = Box<dyn Send + FnMut(IoKind, &str)>;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Deserialize, Serialize)]
 #[serde(untagged)]
@@ -103,9 +108,9 @@ pub struct LanguageServer {
     code_action_kinds: Option<Vec<CodeActionKind>>,
     root_path: PathBuf,
     working_dir: PathBuf,
-    // TODO: io_handlers
-    // TODO: response_handlers
-    // TODO: notification_handlers
+    io_handlers: Arc<Mutex<HashMap<i32, IoHandler>>>,
+    response_handlers: Arc<Mutex<Option<HashMap<RequestIdType, ResponseHandler>>>>,
+    notification_handlers: Arc<Mutex<HashMap<&'static str, NotificationHandler>>>,
     // TODO: using channel to handle tasks
     server: Arc<Mutex<Child>>,
 }
@@ -118,6 +123,9 @@ pub struct AdapterServerCapabilities {
 impl LanguageServer {
     pub fn new() -> Result<Self> {
         Ok(Self {
+            notification_handlers: !todo!(),
+            io_handlers: todo!(),
+            response_handlers: todo!(),
             server_id: todo!(),
             next_id: todo!(),
             name: todo!(),
@@ -128,5 +136,7 @@ impl LanguageServer {
             server: todo!(),
         })
     }
-    pub fn initialize() -> {}
+    pub fn get_code_actions(&self) -> Option<Vec<CodeActionKind>> {
+        self.code_action_kinds.clone()
+    }
 }
