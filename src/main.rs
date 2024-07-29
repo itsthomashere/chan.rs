@@ -1,22 +1,23 @@
-use std::process::Stdio;
+use std::path::Path;
 
-use tokio::{io::AsyncReadExt, process};
+use lsp::lsp::{LanguageServer, LanguageServerBinary};
 
 mod lsp;
 
 #[tokio::main]
 async fn main() {
-    let mut binding = process::Command::new("clangd");
-    let command = binding
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .kill_on_drop(true);
+    let lspbin = LanguageServerBinary {
+        path: Path::new("/home/dacbui308/Projects/rust/liblspc/lsp-bin/clangd_18.1.3/bin/clangd")
+            .to_path_buf(),
+        envs: None,
+        args: Vec::new(),
+    };
 
-    let mut child = command.spawn().unwrap();
-    let mut stdout = child.stdout.take().unwrap();
-    let mut string = String::new();
-    stdout.read_to_string(&mut string).await.unwrap();
+    let root_path = Path::new("/home/dacbui308/Projects/rust/liblspc/");
+    let server_id = lsp::lsp::LspId(9);
 
-    println!("{}", string)
+    let code_action_kinds = None;
+
+    let new_server = LanguageServer::new(lspbin, server_id, root_path, code_action_kinds).unwrap();
+    println!("{:?}", new_server)
 }

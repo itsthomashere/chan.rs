@@ -5,6 +5,7 @@ edition = "2021"
 
 [dependencies]
 anyhow = "1.0.86"
+log = "0.4.22"
 lsp-types = "0.97.0"
 parking_lot = "0.12.3"
 serde = { version = "1.0.204", features = ["derive"] }
