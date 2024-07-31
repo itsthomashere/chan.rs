@@ -2,7 +2,7 @@ use std::{
     collections::HashMap,
     ffi::OsString,
     path::PathBuf,
-    sync::{atomic::AtomicI32, Arc},
+    sync::{Arc, Weak},
 };
 
 use anyhow::Result;
@@ -15,29 +15,47 @@ use tokio::process::Child;
 const JSON_RPC_VER: &str = "2.0";
 const CONTENT_LENGTH_HEADERS: &str = "Content-Length: ";
 
-// TODO!: Adding appilcation context parser later on this
-type NotificationHandler = Box<dyn Send + FnMut(Option<RequestIdType>, Value)>;
+type NotificaionHandler = Box<dyn Send + FnMut(Option<RequestId>, Value)>;
 type ResponseHandler = Box<dyn Send + FnOnce(Result<String, Error>)>;
 type IoHandler = Box<dyn Send + FnMut(IoKind, &str)>;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Deserialize, Serialize)]
 #[serde(untagged)]
-enum RequestIdType {
+pub enum RequestId {
     Int(i32),
     Str(String),
 }
 
-#[derive(Serialize, Deserialize)]
-struct Request<'a, T> {
-    jsonrpc: &'static str,
-    id: RequestIdType,
-    method: &'a str,
-    params: T,
+pub enum Subscription {
+    Notification {
+        method: &'static str,
+        notification_handlers: Option<Arc<Mutex<HashMap<&'static str, NotificaionHandler>>>>,
+    },
+
+    Io {
+        id: i32,
+        io_handers: Option<Weak<Mutex<HashMap<i32, IoHandler>>>>,
+    },
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct Error {
+    message: String,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum IoKind {
+    StdIn,
+    StdOut,
+    StdErr,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
-struct Error {
-    message: String,
+pub struct LspRequest<'a, T> {
+    jsonrpc: &'static str,
+    id: RequestId,
+    method: &'a str,
+    params: T,
 }
 
 #[derive(Serialize)]
@@ -48,95 +66,119 @@ enum LspResult<T> {
     Error(Option<Error>),
 }
 
-#[derive(Deserialize, Serialize)]
-struct AnyResponse<'a> {
-    jsonrpc: &'a str,
-    id: RequestIdType,
-    #[serde(default)]
-    error: Option<Error>,
-    #[serde(borrow)]
-    result: Option<&'a RawValue>,
-}
-
 #[derive(Serialize)]
-struct Response<T> {
+struct LspResponse<T> {
     jsonrpc: &'static str,
-    id: RequestIdType,
+    id: RequestId,
     #[serde(flatten)]
     value: LspResult<T>,
 }
 
-#[derive(Deserialize, Debug, Clone)]
-struct AnyNotification {
-    #[serde(default)]
-    id: Option<RequestIdType>,
-    method: String,
-    #[serde(default)]
-    params: Option<Value>,
-}
-
 #[derive(Serialize, Deserialize)]
-struct Notification<'a, T> {
+struct LspNotification<'a, T> {
     jsonrpc: &'static str,
     #[serde(borrow)]
     method: &'a str,
     params: T,
 }
 
-// Defining basic language server
-//
-pub enum IoKind {
-    StdIn,
-    StdOut,
-    StdErr,
+#[derive(Deserialize, Serialize)]
+struct AnyResponse<'a> {
+    jsonrpc: &'a str,
+    id: RequestId,
+    #[serde(default)]
+    error: Option<Error>,
+    #[serde(borrow)]
+    result: Option<&'a RawValue>,
 }
 
-pub struct LanguageServerBin {
+#[derive(Debug, Clone, Serialize)]
+struct AnyNotification {
+    #[serde(default)]
+    id: RequestId,
+    method: String,
+    #[serde(default)]
+    params: Option<Value>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct LanguageServerBinary {
     path: PathBuf,
-    env: Vec<OsString>,
-    args: Option<Vec<HashMap<String, String>>>,
+    envs: Option<HashMap<String, String>>,
+    args: Vec<OsString>,
 }
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-#[repr(transparent)]
-pub struct LspId(pub usize);
-
 pub struct LanguageServer {
-    server_id: LspId,
-    next_id: AtomicI32,
     name: Arc<str>,
-    capabilities: RwLock<ServerCapabilities>,
-    code_action_kinds: Option<Vec<CodeActionKind>>,
     root_path: PathBuf,
     working_dir: PathBuf,
-    io_handlers: Arc<Mutex<HashMap<i32, IoHandler>>>,
-    response_handlers: Arc<Mutex<Option<HashMap<RequestIdType, ResponseHandler>>>>,
-    notification_handlers: Arc<Mutex<HashMap<&'static str, NotificationHandler>>>,
-    // TODO: using channel to handle tasks
-    server: Arc<Mutex<Child>>,
-}
-
-pub struct AdapterServerCapabilities {
-    pub server_capabilities: ServerCapabilities,
-    pub code_action_kinds: Option<Vec<CodeActionKind>>,
+    capabilities: RwLock<ServerCapabilities>,
+    notification_handlers: Arc<Mutex<HashMap<&'static str, NotificaionHandler>>>,
+    response_handlers: Arc<Mutex<Option<HashMap<&'static str, ResponseHandler>>>>,
+    io_handers: Arc<Mutex<HashMap<i32, IoHandler>>>,
+    code_action_kinds: Option<Vec<CodeActionKind>>,
+    server: Arc<Mutex<Option<Child>>>,
 }
 
 impl LanguageServer {
-    pub fn new() -> Result<Self> {
-        Ok(Self {
-            notification_handlers: !todo!(),
-            io_handlers: todo!(),
-            response_handlers: todo!(),
-            server_id: todo!(),
-            next_id: todo!(),
-            name: todo!(),
-            capabilities: todo!(),
-            code_action_kinds: todo!(),
-            root_path: todo!(),
-            working_dir: todo!(),
-            server: todo!(),
-        })
+    fn initialize() {
+        print!("initialize the LanguageServer");
     }
-    pub fn get_code_actions(&self) -> Option<Vec<CodeActionKind>> {
-        self.code_action_kinds.clone()
+
+    fn code_action_kinds() {
+        println!("Get code actions from the server")
+    }
+
+    fn capabilities() {
+        println!("Get all get_capabilities of the LanguageServer");
+    }
+
+    fn update_capabilities() {
+        println!("update capabilities");
+    }
+
+    fn name() {
+        println!("LSP name");
+    }
+
+    fn server_id() {
+        println!("LSP id")
+    }
+
+    fn root_path() {
+        println!("get the root path")
+    }
+
+    fn adapter_capabilities() {
+        println!("Return the shared client/adapter")
+    }
+
+    fn handle_stdin() {}
+
+    fn handle_stderr() {}
+
+    fn handle_stdout() {}
+
+    fn handle_request() {
+        println!("Register a handler for upcoming requests")
+    }
+
+    fn send_request() {
+        print!("Send request is not implemented");
+    }
+
+    fn send_notification() {
+        println!("this send the notification to the LanguageServer")
+    }
+
+    fn handle_notification() {
+        println!("Register a handler for upcoming notification")
+    }
+
+    fn handle_io() {
+        println!("Register a handler for io operation")
+    }
+
+    fn shutdown() {
+        println!("Prepare to drop the server")
     }
 }
