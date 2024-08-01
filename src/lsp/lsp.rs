@@ -1,16 +1,18 @@
 use std::{
+    arch::x86_64::_MM_ROUND_TOWARD_ZERO,
     collections::HashMap,
     ffi::OsString,
-    path::PathBuf,
+    path::{Path, PathBuf},
+    process::{self, Stdio},
     sync::{Arc, Weak},
 };
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use lsp_types::{CodeActionKind, ServerCapabilities};
 use parking_lot::{Mutex, RwLock};
 use serde::{Deserialize, Serialize};
 use serde_json::{value::RawValue, Value};
-use tokio::process::Child;
+use tokio::process::{Child, ChildStderr, ChildStdin, ChildStdout};
 
 const JSON_RPC_VER: &str = "2.0";
 const CONTENT_LENGTH_HEADERS: &str = "Content-Length: ";
@@ -25,6 +27,10 @@ pub enum RequestId {
     Int(i32),
     Str(String),
 }
+
+#[derive(Debug, Deserialize)]
+#[repr(transparent)]
+pub struct LanguageServerId(pub usize);
 
 pub enum Subscription {
     Notification {
@@ -120,6 +126,52 @@ pub struct LanguageServer {
 }
 
 impl LanguageServer {
+    pub fn new(
+        root_dir: &Path,
+        binary: LanguageServerBinary,
+        server_id: LanguageServerId,
+        code_action_kinds: Option<Vec<CodeActionKind>>,
+    ) -> Result<Self> {
+        let working_dir = if root_dir.is_dir() {
+            root_dir
+        } else {
+            root_dir.parent().unwrap_or_else(|| Path::new("/"))
+        };
+        let mut proc = tokio::process::Command::new(&binary.path);
+        proc.current_dir(working_dir)
+            .args(&binary.args)
+            .envs(&binary.envs.unwrap_or_default())
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .kill_on_drop(true);
+
+        let mut server = proc.spawn().with_context(|| {
+            format!(
+                "Trying to spawn server. Path: {:?}. Woking dir: {:?}. Args: {:?}",
+                &binary.path, working_dir, &binary.args
+            );
+        })?;
+        let mut stdin = server.stdin.take().unwrap();
+        let mut stdout = server.stdout.take().unwrap();
+        let mut stderr = server.stderr.take().unwrap();
+
+        Ok(Self)
+    }
+
+    fn start_backend(
+        server_id: LanguageServerId,
+        stdin: ChildStdin,
+        stdout: ChildStdout,
+        stderr: ChildStderr,
+        stderr_capture: Arc<Mutex<Option<String>>>,
+        server: Option<Child>,
+        root_dir: &Path,
+        working_dir: &Path,
+        code_action_kinds: Option<Vec<CodeActionKind>>,
+    ) -> Self {
+    }
+
     fn initialize() {
         print!("initialize the LanguageServer");
     }
