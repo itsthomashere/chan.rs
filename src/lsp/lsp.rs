@@ -257,7 +257,7 @@ impl LanguageServer {
         stdout: ChildStdout,
         notification_handlers: Arc<Mutex<HashMap<&'static str, NotificaionHandler>>>,
         response_handlers: Arc<Mutex<Option<HashMap<RequestId, ResponseHandler>>>>,
-        io_handers: Arc<Mutex<HashMap<i32, IoHandler>>>,
+        io_handlers: Arc<Mutex<HashMap<i32, IoHandler>>>,
     ) {
         let stdout = BufReader::new(stdout);
         let _clear_response_handlers = {
@@ -268,7 +268,7 @@ impl LanguageServer {
         };
 
         let mut input_handler =
-            input_handlers::LspStdoutHandler::new(stdout, response_handlers, io_handers);
+            input_handlers::LspStdoutHandler::new(stdout, response_handlers, io_handlers);
 
         while let Some(msg) = input_handler.notification_channel.recv().await {
             {
