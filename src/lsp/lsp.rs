@@ -1,8 +1,10 @@
 mod input_handlers;
 use std::{
     arch::x86_64::_MM_ROUND_TOWARD_ZERO,
+    borrow::Borrow,
     collections::HashMap,
     ffi::OsString,
+    ops::Deref,
     path::{Path, PathBuf},
     process::{self, Stdio},
     sync::{Arc, Weak},
@@ -105,7 +107,7 @@ pub struct AnyResponse<'a> {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AnyNotification {
     #[serde(default)]
-    id: RequestId,
+    id: Option<RequestId>,
     method: String,
     #[serde(default)]
     params: Option<Value>,
@@ -221,7 +223,7 @@ impl LanguageServer {
         println!("Return the shared client/adapter")
     }
 
-    fn handle_stdin() {}
+    fn handle_stdin(stdin: ChildStdin) {}
 
     async fn handle_stderr(
         stderr: ChildStderr,
@@ -251,7 +253,7 @@ impl LanguageServer {
         }
     }
 
-    fn handle_stdout(
+    async fn handle_stdout(
         stdout: ChildStdout,
         notification_handlers: Arc<Mutex<HashMap<&'static str, NotificaionHandler>>>,
         response_handlers: Arc<Mutex<Option<HashMap<RequestId, ResponseHandler>>>>,
@@ -265,8 +267,21 @@ impl LanguageServer {
             }
         };
 
-        //TODO: Create input handlers
-        let mut input_handler;
+        let mut input_handler =
+            input_handlers::LspStdoutHandler::new(stdout, response_handlers, io_handers);
+
+        while let Some(msg) = input_handler.notification_channel.recv().await {
+            {
+                let mut notification_handler = notification_handlers.lock();
+                if let Some(handler) = notification_handler.get_mut(msg.method.as_str()) {
+                    handler(msg.id, msg.params.unwrap_or(Value::Null))
+                } else {
+                    drop(notification_handler)
+                }
+            }
+            tokio::task::yield_now();
+        }
+        input_handler.loop_handle.await;
     }
 
     fn handle_request() {

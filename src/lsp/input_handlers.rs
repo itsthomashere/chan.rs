@@ -2,45 +2,51 @@ use crate::{
     AnyNotification, AnyResponse, IoHandler, IoKind, RequestId, ResponseHandler,
     CONTENT_LENGTH_HEADERS,
 };
-use std::{collections::HashMap, future::Future, sync::Arc};
+use std::{collections::HashMap, future::Future, pin::Pin, sync::Arc};
 
 use anyhow::{anyhow, Result};
 use log::warn;
 use parking_lot::Mutex;
 use tokio::{
-    io::{AsyncBufReadExt, AsyncReadExt, BufReader},
-    process::ChildStdout,
+    io::{AsyncBufReadExt, AsyncRead, AsyncReadExt, BufReader},
     sync::mpsc::{self, UnboundedReceiver, UnboundedSender},
 };
 
 const HEADER_DELIMITER: &[u8; 4] = b"\r\n\r\n";
 
+type LoopHandler = Pin<Box<dyn Future<Output = Result<()>>>>;
 pub struct LspStdoutHandler {
-    pub(super) loop_handle: Box<dyn Future<Output = Result<()>>>,
+    pub(super) loop_handle: LoopHandler,
     pub(super) notification_channel: UnboundedReceiver<AnyNotification>,
 }
 
 impl LspStdoutHandler {
-    pub fn new(
-        stdout: ChildStdout,
+    pub fn new<Input>(
+        stdout: Input,
         response_handlers: Arc<Mutex<Option<HashMap<RequestId, ResponseHandler>>>>,
         io_handers: Arc<Mutex<HashMap<i32, IoHandler>>>,
-    ) -> Self {
+    ) -> Self
+    where
+        Input: AsyncRead + Send + Unpin + 'static,
+    {
         let (tx, notification_channel) = mpsc::unbounded_channel();
 
-        let loop_handle = Box::new(Self::handle(stdout, tx, response_handlers, io_handers));
+        let loop_handle = Box::pin(Self::handle(stdout, tx, response_handlers, io_handers));
         Self {
             loop_handle,
             notification_channel,
         }
     }
 
-    pub async fn handle(
-        stdout: ChildStdout,
+    pub async fn handle<Input>(
+        stdout: Input,
         notification_sender: UnboundedSender<AnyNotification>,
         response_handlers: Arc<Mutex<Option<HashMap<RequestId, ResponseHandler>>>>,
         io_handers: Arc<Mutex<HashMap<i32, IoHandler>>>,
-    ) -> anyhow::Result<()> {
+    ) -> anyhow::Result<()>
+    where
+        Input: AsyncRead + Send + Unpin + 'static,
+    {
         let mut stdout = BufReader::new(stdout);
 
         let mut buffer = Vec::new();
@@ -97,10 +103,13 @@ impl LspStdoutHandler {
     }
 }
 
-pub(self) async fn read_headers(
-    reader: &mut BufReader<ChildStdout>,
+pub(self) async fn read_headers<StdOut>(
+    reader: &mut BufReader<StdOut>,
     buffer: &mut Vec<u8>,
-) -> Result<()> {
+) -> Result<()>
+where
+    StdOut: AsyncRead + Unpin + Send + 'static,
+{
     loop {
         if buffer.len() >= HEADER_DELIMITER.len()
             && buffer[(buffer.len() - HEADER_DELIMITER.len())..] == HEADER_DELIMITER[..]
