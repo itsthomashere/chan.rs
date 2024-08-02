@@ -1,3 +1,4 @@
+mod input_handlers;
 use std::{
     arch::x86_64::_MM_ROUND_TOWARD_ZERO,
     collections::HashMap,
@@ -17,12 +18,12 @@ use tokio::{
     process::{Child, ChildStderr, ChildStdin, ChildStdout},
 };
 
-const JSON_RPC_VER: &str = "2.0";
-const CONTENT_LENGTH_HEADERS: &str = "Content-Length: ";
+pub const JSON_RPC_VER: &str = "2.0";
+pub const CONTENT_LENGTH_HEADERS: &str = "Content-Length: ";
 
-type NotificaionHandler = Box<dyn Send + FnMut(Option<RequestId>, Value)>;
-type ResponseHandler = Box<dyn Send + FnOnce(Result<String, Error>)>;
-type IoHandler = Box<dyn Send + FnMut(IoKind, &str)>;
+pub type NotificaionHandler = Box<dyn Send + FnMut(Option<RequestId>, Value)>;
+pub type ResponseHandler = Box<dyn Send + FnOnce(Result<String, Error>)>;
+pub type IoHandler = Box<dyn Send + FnMut(IoKind, &str)>;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Deserialize, Serialize)]
 #[serde(untagged)]
@@ -92,7 +93,7 @@ struct LspNotification<'a, T> {
 }
 
 #[derive(Deserialize, Serialize)]
-struct AnyResponse<'a> {
+pub struct AnyResponse<'a> {
     jsonrpc: &'a str,
     id: RequestId,
     #[serde(default)]
@@ -101,8 +102,8 @@ struct AnyResponse<'a> {
     result: Option<&'a RawValue>,
 }
 
-#[derive(Debug, Clone, Serialize)]
-struct AnyNotification {
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AnyNotification {
     #[serde(default)]
     id: RequestId,
     method: String,

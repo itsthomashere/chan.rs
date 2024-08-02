@@ -3,6 +3,11 @@ name = "liblspc"
 version = "0.1.0"
 edition = "2021"
 
+[lib]
+path= "src/lsp/lsp.rs"
+doctest= false
+
+
 [dependencies]
 anyhow = "1.0.86"
 log = "0.4.22"
