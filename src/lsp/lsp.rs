@@ -1,12 +1,10 @@
 mod input_handlers;
+mod server;
 use std::{
-    arch::x86_64::_MM_ROUND_TOWARD_ZERO,
-    borrow::Borrow,
     collections::HashMap,
     ffi::OsString,
-    ops::Deref,
     path::{Path, PathBuf},
-    process::{self, Stdio},
+    process::Stdio,
     sync::{Arc, Weak},
 };
 
