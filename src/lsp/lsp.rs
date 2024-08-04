@@ -1,3 +1,4 @@
+mod client;
 mod input_handlers;
 mod server;
 use std::{
