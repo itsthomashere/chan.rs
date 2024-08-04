@@ -5,7 +5,7 @@ use std::{
 
 use anyhow::anyhow;
 use liblspc::{LanguageServerBinary, LanguageSeverProcess, CONTENT_LEN_HEADER};
-use lsp_types::{InitializeResult, ServerInfo};
+use lsp_types::InitializeResult;
 use serde::{Deserialize, Serialize};
 use serde_json::value::RawValue;
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, BufReader};
@@ -45,8 +45,8 @@ async fn main() {
 
             reader.read_exact(&mut buffer).await.unwrap();
             let buf2 = buffer.to_vec();
-            println!("{}", std::str::from_utf8(&buffer).unwrap());
             let message_json: Response<InitializeResult> = serde_json::from_slice(&buf2).unwrap();
+            println!("{}", message);
             println!("{:?}", message_json)
         };
     }
