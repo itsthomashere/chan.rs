@@ -7,13 +7,15 @@ use std::{
     sync::Arc,
 };
 
-use anyhow::Ok;
+use anyhow::{anyhow, Ok};
 use lsp_types::{
     request::{self, Request},
     InitializeParams,
 };
 use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
+use tokio::io::{AsyncBufReadExt, BufReader};
+use tokio::process::ChildStdout;
 use tokio::{
     io::{AsyncWriteExt, BufWriter},
     process::{Child, Command},
@@ -21,6 +23,7 @@ use tokio::{
 
 pub const CONTENT_LEN_HEADER: &str = "Content-Length: ";
 pub const JSONPRC_VER: &str = "2.0";
+const HEADER_DELIMITER: &[u8; 4] = b"\r\n\r\n";
 pub struct LanguageServerBinary {
     pub path: PathBuf,
     pub envs: Option<HashMap<String, String>>,
@@ -91,4 +94,20 @@ struct LspRequest<'a, T> {
     id: i32,
     method: &'a str,
     params: T,
+}
+
+pub async fn read_headers(
+    reader: &mut BufReader<ChildStdout>,
+    buffer: &mut Vec<u8>,
+) -> anyhow::Result<()> {
+    loop {
+        if buffer.len() >= HEADER_DELIMITER.len()
+            && buffer[(buffer.len() - HEADER_DELIMITER.len())..] == HEADER_DELIMITER[..]
+        {
+            return Ok(());
+        }
+        if reader.read_until(b'\n', buffer).await? == 0 {
+            return Err(anyhow!("cannot read headers from stdout"));
+        }
+    }
 }
