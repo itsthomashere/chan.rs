@@ -5,6 +5,7 @@ use std::collections::HashMap;
 use std::io::Write;
 use std::path::PathBuf;
 use std::process::Stdio;
+use std::sync::atomic::AtomicI32;
 use std::{path::Path, sync::Arc};
 
 use anyhow::{anyhow, Context, Ok};
@@ -19,8 +20,8 @@ use tokio::process::{Child, Command};
 use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
 use tokio::{io::BufWriter, process::ChildStdout};
 use types::types::{
-    LspRequest, LspRequestId, NotificationHandler, ResponseHandler, CONTENT_LEN_HEADER,
-    HEADER_DELIMITER, JSONPRC_VER,
+    LspRequest, LspRequestFuture, LspRequestId, NotificationHandler, ResponseHandler,
+    CONTENT_LEN_HEADER, HEADER_DELIMITER, JSONPRC_VER,
 };
 
 pub struct LanguageSeverProcess {
@@ -129,9 +130,26 @@ impl LanguageSeverProcess {
         Ok(())
     }
 
-    pub fn request<T: request::Request>(&self, params: T::Params) {}
-}
+    pub fn request<T: request::Request>(
+        &self,
+        params: T::Params,
+    ) -> impl LspRequestFuture<anyhow::Result<T::Result>>
+    where
+        T::Result: 'static + Send,
+    {
+    }
 
+    async fn background_request<T: request::Request>(
+        next_id: &AtomicI32,
+        response_handlers: &Mutex<Option<HashMap<LspRequestId, ResponseHandler>>>,
+        outbound_sender: UnboundedSender<String>,
+        params: T::Params,
+    ) -> impl LspRequestFuture<anyhow::Result<T::Result>>
+    where
+        T::Result: 'static + Send,
+    {
+    }
+}
 pub async fn read_headers(
     reader: &mut BufReader<ChildStdout>,
     buffer: &mut Vec<u8>,
