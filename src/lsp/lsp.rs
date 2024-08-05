@@ -5,7 +5,6 @@ use std::collections::HashMap;
 use std::io::Write;
 use std::path::PathBuf;
 use std::process::Stdio;
-use std::sync::atomic::AtomicI32;
 use std::{path::Path, sync::Arc};
 
 use anyhow::{anyhow, Context, Ok};
@@ -20,13 +19,13 @@ use tokio::process::{Child, Command};
 use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
 use tokio::{io::BufWriter, process::ChildStdout};
 use types::types::{
-    LspRequest, LspRequestFuture, LspRequestId, NotificationHandler, ResponseHandler,
-    CONTENT_LEN_HEADER, HEADER_DELIMITER, JSONPRC_VER,
+    LspRequest, LspRequestId, NotificationHandler, ResponseHandler, CONTENT_LEN_HEADER,
+    HEADER_DELIMITER, JSONPRC_VER,
 };
 
 pub struct LanguageSeverProcess {
     name: Arc<str>,
-    process: Arc<Mutex<Option<Child>>>,
+    pub process: Arc<Mutex<Child>>,
     capabilities: RwLock<ServerCapabilities>,
     response_handlers: Arc<Mutex<Option<HashMap<LspRequestId, ResponseHandler>>>>,
     notification_handlers: Arc<Mutex<HashMap<&'static str, NotificationHandler>>>,
@@ -65,8 +64,7 @@ impl LanguageSeverProcess {
             )
         })?;
 
-        let mut server =
-            Self::binding_backend(Some(process), root_path, working_dir, code_action_kinds);
+        let mut server = Self::binding_backend(process, root_path, working_dir, code_action_kinds);
 
         if let Some(name) = binary.path.file_name() {
             server.name = name.to_string_lossy().into()
@@ -76,7 +74,7 @@ impl LanguageSeverProcess {
     }
 
     fn binding_backend(
-        process: Option<Child>,
+        process: Child,
         root_path: &Path,
         working_dir: &Path,
         code_action_kinds: Option<Vec<CodeActionKind>>,
@@ -102,13 +100,13 @@ impl LanguageSeverProcess {
         }
     }
 
-    pub async fn initialize(self) -> anyhow::Result<()> {
-        let mut server = self.process.lock().unwrap();
-        let stdin = server.stdin.take().unwrap();
+    pub async fn initialize(&mut self) -> anyhow::Result<()> {
+        let mut proce = self.process.lock();
+        let stdin = proce.stdin.take().unwrap();
 
         let params = InitializeParams::default();
         let message = serde_json::to_string(&LspRequest {
-            jsonprc: JSONPRC_VER,
+            jsonrpc: JSONPRC_VER,
             id: LspRequestId::Int(0),
             method: request::Initialize::METHOD,
             params,
@@ -128,26 +126,6 @@ impl LanguageSeverProcess {
         }
 
         Ok(())
-    }
-
-    pub fn request<T: request::Request>(
-        &self,
-        params: T::Params,
-    ) -> impl LspRequestFuture<anyhow::Result<T::Result>>
-    where
-        T::Result: 'static + Send,
-    {
-    }
-
-    async fn background_request<T: request::Request>(
-        next_id: &AtomicI32,
-        response_handlers: &Mutex<Option<HashMap<LspRequestId, ResponseHandler>>>,
-        outbound_sender: UnboundedSender<String>,
-        params: T::Params,
-    ) -> impl LspRequestFuture<anyhow::Result<T::Result>>
-    where
-        T::Result: 'static + Send,
-    {
     }
 }
 pub async fn read_headers(

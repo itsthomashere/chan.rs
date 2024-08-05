@@ -1,6 +1,4 @@
-use std::{
-    collections::HashMap, ffi::OsString, future::Future, path::PathBuf, pin::Pin, sync::Arc,
-};
+use std::{collections::HashMap, ffi::OsString, path::PathBuf};
 
 use serde::{Deserialize, Serialize};
 use serde_json::{value::RawValue, Value};
@@ -26,12 +24,8 @@ pub struct LanguageServerBinary {
 
 #[derive(Debug, Deserialize)]
 pub struct ProccessId(pub usize);
-#[derive(Debug, Deserialize, Serialize)]
-pub struct Error {
-    message: String,
-}
 
-#[derive(Clone, PartialEq, Eq, Hash, Deserialize, Serialize, Debug)]
+#[derive(Debug, Clone, Eq, PartialEq, Hash, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum LspRequestId {
     Str(String),
@@ -40,31 +34,30 @@ pub enum LspRequestId {
 
 #[derive(Deserialize, Serialize)]
 pub struct LspRequest<'a, T> {
-    pub jsonprc: &'a str,
+    pub jsonrpc: &'a str,
     pub id: LspRequestId,
     pub method: &'a str,
     pub params: T,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct AnyResponse<'a> {
-    pub jsonprc: &'a str,
-    pub id: LspRequestId,
+    jsonrpc: &'a str,
+    id: LspRequestId,
     #[serde(default)]
-    pub error: Option<Error>,
+    error: Option<Error>,
     #[serde(borrow)]
-    pub result: Option<&'a RawValue>,
+    result: Option<&'a RawValue>,
 }
-
-#[derive(Serialize)]
-pub struct LspResponse<T> {
-    pub jsonprc: &'static str,
-    pub id: LspRequestId,
+#[derive(Debug, Serialize, Deserialize)]
+pub struct LspResponse<'a, T> {
+    jsonrpc: &'a str,
+    id: LspRequestId,
     #[serde(flatten)]
-    pub value: LspResult<T>,
+    value: LspResult<T>,
 }
 
-#[derive(Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 enum LspResult<T> {
     #[serde(rename = "result")]
@@ -72,52 +65,23 @@ enum LspResult<T> {
     Error(Option<Error>),
 }
 
+#[derive(Debug, Serialize, Deserialize)]
+pub struct Error {
+    message: String,
+}
 #[derive(Deserialize, Serialize)]
 pub struct LspNotification<'a, T> {
-    pub jsonprc: &'a str,
+    pub jsonrpc: &'a str,
     #[serde(borrow)]
     pub method: &'a str,
     pub params: T,
 }
 
-#[derive(Debug, Serialize, Clone)]
+#[derive(Debug, Serialize, Clone, Deserialize)]
 pub struct AnyNotification {
     #[serde(default)]
     pub id: Option<LspRequestId>,
     pub method: String,
     #[serde(default)]
     pub params: Option<Value>,
-}
-
-pub trait LspRequestFuture<O>: Future<Output = O> {
-    fn id(&self) -> i32;
-}
-
-pub struct FutureRequest<F> {
-    id: i32,
-    request: F,
-}
-
-impl<F> FutureRequest<F> {
-    fn new(id: i32, request: F) -> Self {
-        Self { id, request }
-    }
-}
-
-impl<F: Future> Future for FutureRequest<F> {
-    type Output = F::Output;
-
-    fn poll(
-        self: std::pin::Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<Self::Output> {
-        let inner = unsafe { Pin::new_unchecked(&mut self.get_unchecked_mut().request) };
-        inner.poll(cx)
-    }
-}
-
-impl<F: Future> LspRequestFuture<F::Output> for FutureRequest<F> {
-    fn id(&self) -> i32 {
-        self.id
-    }
 }
