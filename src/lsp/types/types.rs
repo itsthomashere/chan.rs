@@ -2,10 +2,8 @@ use std::{
     collections::HashMap, ffi::OsString, future::Future, path::PathBuf, pin::Pin, sync::Arc,
 };
 
-use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
 use serde_json::{value::RawValue, Value};
-use tokio::process::Child;
 
 pub const CONTENT_LEN_HEADER: &str = "Content-Length: ";
 pub const JSONPRC_VER: &str = "2.0";
