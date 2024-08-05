@@ -4,21 +4,23 @@ use std::{
 };
 
 use anyhow::{anyhow, Result};
-use liblspc::{read_headers, LanguageServerBinary, LanguageSeverProcess, CONTENT_LEN_HEADER};
-use serde::{Deserialize, Serialize};
-use serde_json::{json, value::RawValue};
-use tokio::io::{AsyncBufReadExt, AsyncReadExt, BufReader};
+use liblspc::{
+    read_headers,
+    types::types::{AnyNotification, AnyResponse, LanguageServerBinary, CONTENT_LEN_HEADER},
+    LanguageSeverProcess,
+};
+use tokio::io::{AsyncReadExt, BufReader};
 
 #[tokio::main]
 async fn main() -> Result<()> {
     let binary = LanguageServerBinary {
-        path: PathBuf::from(OsString::from("rust-analyzer")),
+        path: PathBuf::from(OsString::from("clangd")),
         envs: None,
         args: Vec::new(),
     };
     let root = Path::new("/");
 
-    let mut procc = LanguageSeverProcess::new(binary, root, None);
+    let mut procc = LanguageSeverProcess::new(binary, root, None).unwrap();
     let stdout = procc.process.lock().stdout.take().unwrap();
 
     let mut reader = BufReader::new(stdout);
@@ -42,16 +44,12 @@ async fn main() -> Result<()> {
         buffer.resize(message_len, 0);
         reader.read_exact(&mut buffer).await?;
 
-        if let Ok(AnyResponse {
-            jsonrpc,
-            id,
-            error,
-            result,
-            ..
-        }) = serde_json::from_slice(&buffer)
-        {
-            println!("{:?}", error);
-            println!("{}", result.unwrap());
+        if let Ok(msg) = serde_json::from_slice::<AnyResponse>(&buffer) {
+            println!("{:?}", msg);
+        } else if let Ok(notification) = serde_json::from_slice::<AnyNotification>(&buffer) {
+            println!("{:?}", notification);
+        } else {
+            println!("Invalid Response");
         }
     }
 }
