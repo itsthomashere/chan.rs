@@ -1,4 +1,4 @@
-mod handlers;
+pub mod handlers;
 pub mod types;
 
 use crate::types::types::LanguageServerBinary;
@@ -12,18 +12,17 @@ use std::{path::Path, sync::Arc};
 use anyhow::{anyhow, Context, Ok};
 use lsp_types::request::Initialize;
 use lsp_types::{
-    request::{self, Request},
+    request::{self},
     InitializeParams,
 };
 use lsp_types::{CodeActionKind, ServerCapabilities};
 use parking_lot::{Mutex, RwLock};
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use tokio::io::AsyncWriteExt;
+use tokio::io::BufWriter;
 use tokio::process::{Child, Command};
 use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
-use tokio::{io::BufWriter, process::ChildStdout};
 use types::types::{
-    LspRequest, LspRequestId, NotificationHandler, ResponseHandler, CONTENT_LEN_HEADER,
-    HEADER_DELIMITER, JSONPRC_VER,
+    LspRequest, LspRequestId, NotificationHandler, ResponseHandler, CONTENT_LEN_HEADER, JSONPRC_VER,
 };
 
 pub struct LanguageSeverProcess {
@@ -142,20 +141,5 @@ impl LanguageSeverProcess {
         writer.write_all(message.as_bytes()).await?;
         writer.flush().await?;
         Ok(())
-    }
-}
-pub async fn read_headers(
-    reader: &mut BufReader<ChildStdout>,
-    buffer: &mut Vec<u8>,
-) -> anyhow::Result<()> {
-    loop {
-        if buffer.len() >= HEADER_DELIMITER.len()
-            && buffer[(buffer.len() - HEADER_DELIMITER.len())..] == HEADER_DELIMITER[..]
-        {
-            return Ok(());
-        }
-        if reader.read_until(b'\n', buffer).await? == 0 {
-            return Err(anyhow!("cannot read headers from stdout"));
-        }
     }
 }
