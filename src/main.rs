@@ -4,8 +4,8 @@ use std::{
 };
 
 use anyhow::{anyhow, Result};
+use liblspc::handlers::input_handlers::read_headers;
 use liblspc::{
-    read_headers,
     types::types::{AnyNotification, AnyResponse, LanguageServerBinary, CONTENT_LEN_HEADER},
     LanguageSeverProcess,
 };
