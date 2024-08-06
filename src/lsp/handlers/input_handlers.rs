@@ -14,9 +14,9 @@ use crate::types::types::{
     CONTENT_LEN_HEADER, HEADER_DELIMITER,
 };
 
-pub(super) struct LspChannelInputHandler {
-    response_handlers: Arc<Mutex<Option<HashMap<LspRequestId, ResponseHandler>>>>,
-    notification_handlers: Arc<Mutex<HashMap<&'static str, NotificationHandler>>>,
+pub struct LspChannelInputHandler {
+    pub response_handlers: Arc<Mutex<Option<HashMap<LspRequestId, ResponseHandler>>>>,
+    pub notification_handlers: Arc<Mutex<HashMap<&'static str, NotificationHandler>>>,
 }
 
 impl LspChannelInputHandler {
@@ -31,7 +31,6 @@ impl LspChannelInputHandler {
     }
     async fn handler(
         stdout: ChildStdout,
-        notification_handlers: Arc<Mutex<HashMap<&'static str, NotificationHandler>>>,
         response_handlers: Arc<Mutex<Option<HashMap<LspRequestId, ResponseHandler>>>>,
         channel_sender: UnboundedSender<AnyNotification>,
     ) -> anyhow::Result<()> {

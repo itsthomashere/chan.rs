@@ -9,7 +9,8 @@ use std::process::Stdio;
 use std::sync::atomic::AtomicI32;
 use std::{path::Path, sync::Arc};
 
-use anyhow::{anyhow, Context, Ok};
+use anyhow::{anyhow, Context};
+use handlers::input_handlers::read_headers;
 use lsp_types::request::Initialize;
 use lsp_types::{
     request::{self},
@@ -18,23 +19,22 @@ use lsp_types::{
 use lsp_types::{CodeActionKind, ServerCapabilities};
 use parking_lot::{Mutex, RwLock};
 use tokio::io::AsyncWriteExt;
-use tokio::io::BufWriter;
+use tokio::io::{BufReader, BufWriter};
 use tokio::process::{Child, Command};
 use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
-use types::types::{
-    LspRequest, LspRequestId, NotificationHandler, ResponseHandler, CONTENT_LEN_HEADER, JSONPRC_VER,
-};
+use types::types::{LspRequest, LspRequestId, CONTENT_LEN_HEADER, JSONPRC_VER};
 
 pub struct LanguageSeverProcess {
     name: Arc<str>,
     pub process: Arc<Mutex<Child>>,
     next_id: AtomicI32,
     capabilities: RwLock<ServerCapabilities>,
-    response_handlers: Arc<Mutex<Option<HashMap<LspRequestId, ResponseHandler>>>>,
-    notification_handlers: Arc<Mutex<HashMap<&'static str, NotificationHandler>>>,
     code_action_kinds: Option<Vec<CodeActionKind>>,
-    outbound_sender: UnboundedSender<String>,
-    outbound_receiver: UnboundedReceiver<String>,
+    request_tx: UnboundedSender<String>,
+    response_rx: UnboundedReceiver<String>,
+    err_rx: UnboundedReceiver<String>,
+    notification_tx: UnboundedSender<String>,
+    notification_rx: UnboundedReceiver<String>,
     root_path: PathBuf,
     working_dir: PathBuf,
 }
@@ -82,41 +82,36 @@ impl LanguageSeverProcess {
         working_dir: &Path,
         code_action_kinds: Option<Vec<CodeActionKind>>,
     ) -> Self {
-        let notification_handlers =
-            Arc::new(Mutex::new(HashMap::<_, NotificationHandler>::default()));
-        let response_handlers =
-            Arc::new(Mutex::new(Some(HashMap::<_, ResponseHandler>::default())));
-
-        let (outbound_sender, outbound_receiver) = mpsc::unbounded_channel::<String>();
+        let (request_tx, response_rx) = mpsc::unbounded_channel::<String>();
+        let (notification_tx, notification_rx) = mpsc::unbounded_channel::<String>();
+        let (err_tx, err_rx) = mpsc::unbounded_channel::<String>();
 
         Self {
             name: Arc::default(),
             next_id: Default::default(),
             process: Arc::new(Mutex::new(process)),
             capabilities: Default::default(),
-            response_handlers,
-            notification_handlers,
             code_action_kinds,
-            outbound_sender,
-            outbound_receiver,
             root_path: root_path.to_path_buf(),
             working_dir: working_dir.to_path_buf(),
+            request_tx,
+            response_rx,
+            err_rx,
+            notification_tx,
+            notification_rx,
         }
     }
 
-    pub async fn handle_incoming_msg() -> anyhow::Result<()> {
-        Ok(())
-    }
     pub async fn initialize(&mut self) -> anyhow::Result<()> {
         let params = InitializeParams::default();
-        self.request::<Initialize>(params).await?;
+        self.send_request::<Initialize>(params).await?;
         Ok(())
     }
 
-    pub async fn request<T: request::Request>(&mut self, params: T::Params) -> anyhow::Result<()> {
-        let mut proc = self.process.lock();
-        let stdin = proc.stdin.take().unwrap();
-
+    pub async fn send_request<T: request::Request>(
+        &mut self,
+        params: T::Params,
+    ) -> anyhow::Result<()> {
         let id = self
             .next_id
             .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
@@ -127,19 +122,49 @@ impl LanguageSeverProcess {
             params,
         })
         .unwrap();
+        println!("{}", message);
 
-        let mut content_len_buffer = Vec::new();
-        if let Err(msg) = write!(content_len_buffer, "{}", message.as_bytes().len()) {
-            return Err(anyhow!("Failed to write content len into buffer: {}", msg));
+        self.outbound_sender.send(message)?;
+        self.handle_channel_in().await?;
+
+        Ok(())
+    }
+
+    async fn register_output_chanel(
+        &mut self,
+        channel_out: UnboundedSender<String>,
+    ) -> anyhow::Result<()> {
+        let mut proc = self.process.clone();
+        let mut stdout = proc.lock().stdout.take().unwrap();
+        let mut reader = BufReader::new(stdout);
+        let mut buffer = Vec::new();
+        loop {
+            buffer.clear();
+            read_headers(&mut reader, &mut buffer).await?;
         }
+    }
+
+    async fn handle_channel_in(&mut self) -> anyhow::Result<()> {
+        let mut proc = self.process.clone();
+        let stdin = proc.lock().stdin.take().unwrap();
 
         let mut writer = BufWriter::new(stdin);
 
-        writer.write_all(CONTENT_LEN_HEADER.as_bytes()).await?;
-        writer.write_all(&content_len_buffer).await?;
-        writer.write_all("\r\n\r\n".as_bytes()).await?;
-        writer.write_all(message.as_bytes()).await?;
-        writer.flush().await?;
+        let mut content_len_buffer: Vec<u8> = Vec::new();
+
+        if let Some(msg) = self.outbound_receiver.recv().await {
+            content_len_buffer.clear();
+            if let Err(msg) = write!(content_len_buffer, "{}", msg.as_bytes().len()) {
+                return Err(anyhow!("Failed to write content len into buffer: {}", msg));
+            }
+            writer.write_all(CONTENT_LEN_HEADER.as_bytes()).await?;
+            writer.write_all(&content_len_buffer).await?;
+            writer.write_all("\r\n\r\n".as_bytes()).await?;
+            writer.write_all(msg.as_bytes()).await?;
+            writer.flush().await?;
+        }
+        tokio::task::yield_now().await;
+
         Ok(())
     }
 }
