@@ -14,7 +14,7 @@ use tokio::io::{AsyncReadExt, BufReader};
 #[tokio::main]
 async fn main() -> Result<()> {
     let binary = LanguageServerBinary {
-        path: PathBuf::from(OsString::from("rust-analyzer")),
+        path: PathBuf::from(OsString::from("clangd")),
         envs: None,
         args: Vec::new(),
     };
@@ -25,10 +25,7 @@ async fn main() -> Result<()> {
 
     let mut reader = BufReader::new(stdout);
     let mut buffer: Vec<u8> = Vec::new();
-    {
-        procc.initialize().await.unwrap()
-    }
-
+    procc.initialize().await.unwrap();
     loop {
         buffer.clear();
         read_headers(&mut reader, &mut buffer).await?;
