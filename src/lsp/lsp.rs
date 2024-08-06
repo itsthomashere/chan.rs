@@ -22,7 +22,7 @@ use tokio::io::AsyncWriteExt;
 use tokio::io::{BufReader, BufWriter};
 use tokio::process::{Child, Command};
 use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
-use types::types::{LspRequest, LspRequestId, CONTENT_LEN_HEADER, JSONPRC_VER};
+use types::types::{LspRequest, LspRequestId, LspResponse, CONTENT_LEN_HEADER, JSONPRC_VER};
 
 pub struct LanguageSeverProcess {
     name: Arc<str>,
@@ -124,47 +124,13 @@ impl LanguageSeverProcess {
         .unwrap();
         println!("{}", message);
 
-        self.outbound_sender.send(message)?;
-        self.handle_channel_in().await?;
+        self.request_tx.send(message)?;
 
         Ok(())
     }
 
-    async fn register_output_chanel(
-        &mut self,
-        channel_out: UnboundedSender<String>,
-    ) -> anyhow::Result<()> {
-        let mut proc = self.process.clone();
-        let mut stdout = proc.lock().stdout.take().unwrap();
-        let mut reader = BufReader::new(stdout);
-        let mut buffer = Vec::new();
-        loop {
-            buffer.clear();
-            read_headers(&mut reader, &mut buffer).await?;
-        }
-    }
-
-    async fn handle_channel_in(&mut self) -> anyhow::Result<()> {
-        let mut proc = self.process.clone();
-        let stdin = proc.lock().stdin.take().unwrap();
-
-        let mut writer = BufWriter::new(stdin);
-
-        let mut content_len_buffer: Vec<u8> = Vec::new();
-
-        if let Some(msg) = self.outbound_receiver.recv().await {
-            content_len_buffer.clear();
-            if let Err(msg) = write!(content_len_buffer, "{}", msg.as_bytes().len()) {
-                return Err(anyhow!("Failed to write content len into buffer: {}", msg));
-            }
-            writer.write_all(CONTENT_LEN_HEADER.as_bytes()).await?;
-            writer.write_all(&content_len_buffer).await?;
-            writer.write_all("\r\n\r\n".as_bytes()).await?;
-            writer.write_all(msg.as_bytes()).await?;
-            writer.flush().await?;
-        }
-        tokio::task::yield_now().await;
-
-        Ok(())
-    }
+    async fn register_request_tx() {}
+    async fn register_notification_channel() {}
+    async fn get_response() {}
+    async fn get_notification() {}
 }
