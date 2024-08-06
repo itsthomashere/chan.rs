@@ -1,3 +1,4 @@
+mod handlers;
 pub mod types;
 
 use crate::types::types::LanguageServerBinary;
@@ -5,9 +6,11 @@ use std::collections::HashMap;
 use std::io::Write;
 use std::path::PathBuf;
 use std::process::Stdio;
+use std::sync::atomic::AtomicI32;
 use std::{path::Path, sync::Arc};
 
 use anyhow::{anyhow, Context, Ok};
+use lsp_types::request::Initialize;
 use lsp_types::{
     request::{self, Request},
     InitializeParams,
@@ -26,6 +29,7 @@ use types::types::{
 pub struct LanguageSeverProcess {
     name: Arc<str>,
     pub process: Arc<Mutex<Child>>,
+    next_id: AtomicI32,
     capabilities: RwLock<ServerCapabilities>,
     response_handlers: Arc<Mutex<Option<HashMap<LspRequestId, ResponseHandler>>>>,
     notification_handlers: Arc<Mutex<HashMap<&'static str, NotificationHandler>>>,
@@ -88,6 +92,7 @@ impl LanguageSeverProcess {
 
         Self {
             name: Arc::default(),
+            next_id: Default::default(),
             process: Arc::new(Mutex::new(process)),
             capabilities: Default::default(),
             response_handlers,
@@ -100,31 +105,42 @@ impl LanguageSeverProcess {
         }
     }
 
+    pub async fn handle_incoming_msg() -> anyhow::Result<()> {
+        Ok(())
+    }
     pub async fn initialize(&mut self) -> anyhow::Result<()> {
-        let mut proce = self.process.lock();
-        let stdin = proce.stdin.take().unwrap();
-
         let params = InitializeParams::default();
+        self.request::<Initialize>(params).await?;
+        Ok(())
+    }
+
+    pub async fn request<T: request::Request>(&mut self, params: T::Params) -> anyhow::Result<()> {
+        let mut proc = self.process.lock();
+        let stdin = proc.stdin.take().unwrap();
+
+        let id = self
+            .next_id
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         let message = serde_json::to_string(&LspRequest {
             jsonrpc: JSONPRC_VER,
-            id: LspRequestId::Int(0),
-            method: request::Initialize::METHOD,
+            id: LspRequestId::Int(id),
+            method: T::METHOD,
             params,
         })
         .unwrap();
-        {
-            let mut content_len_buffer = Vec::new();
-            write!(content_len_buffer, "{}", message.as_bytes().len()).unwrap();
 
-            let mut bufwriter = BufWriter::new(stdin);
-
-            bufwriter.write_all(CONTENT_LEN_HEADER.as_bytes()).await?;
-            bufwriter.write_all(&content_len_buffer).await?;
-            bufwriter.write_all("\r\n\r\n".as_bytes()).await?;
-            bufwriter.write_all(message.as_bytes()).await?;
-            bufwriter.flush().await?;
+        let mut content_len_buffer = Vec::new();
+        if let Err(msg) = write!(content_len_buffer, "{}", message.as_bytes().len()) {
+            return Err(anyhow!("Failed to write content len into buffer: {}", msg));
         }
 
+        let mut writer = BufWriter::new(stdin);
+
+        writer.write_all(CONTENT_LEN_HEADER.as_bytes()).await?;
+        writer.write_all(&content_len_buffer).await?;
+        writer.write_all("\r\n\r\n".as_bytes()).await?;
+        writer.write_all(message.as_bytes()).await?;
+        writer.flush().await?;
         Ok(())
     }
 }
