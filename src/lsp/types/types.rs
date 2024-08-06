@@ -42,12 +42,12 @@ pub struct LspRequest<'a, T> {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct AnyResponse<'a> {
-    jsonrpc: &'a str,
-    id: LspRequestId,
+    pub jsonrpc: &'a str,
+    pub id: LspRequestId,
     #[serde(default)]
-    error: Option<Error>,
+    pub error: Option<Error>,
     #[serde(borrow)]
-    result: Option<&'a RawValue>,
+    pub result: Option<&'a RawValue>,
 }
 #[derive(Debug, Serialize, Deserialize)]
 pub struct LspResponse<'a, T> {
