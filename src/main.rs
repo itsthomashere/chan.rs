@@ -14,7 +14,7 @@ use tokio::io::{AsyncReadExt, BufReader};
 #[tokio::main]
 async fn main() -> Result<()> {
     let binary = LanguageServerBinary {
-        path: PathBuf::from(OsString::from("clangd")),
+        path: PathBuf::from(OsString::from("rust-analyzer")),
         envs: None,
         args: Vec::new(),
     };
