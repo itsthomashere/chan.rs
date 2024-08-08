@@ -6,7 +6,7 @@ use parking_lot::Mutex;
 use tokio::{
     io::{AsyncBufReadExt, AsyncReadExt, BufReader},
     process::ChildStdout,
-    sync::mpsc::UnboundedSender,
+    sync::mpsc::{UnboundedReceiver, UnboundedSender},
 };
 
 use crate::types::types::{
@@ -17,6 +17,8 @@ use crate::types::types::{
 pub struct LspChannelInputHandler {
     pub response_handlers: Arc<Mutex<Option<HashMap<LspRequestId, ResponseHandler>>>>,
     pub notification_handlers: Arc<Mutex<HashMap<&'static str, NotificationHandler>>>,
+    pub notification_channel: UnboundedReceiver<AnyNotification>,
+    channel_sender: UnboundedSender<AnyNotification>,
 }
 
 impl LspChannelInputHandler {

@@ -12,14 +12,15 @@ use anyhow::{anyhow, Context};
 use handlers::input_handlers::read_headers;
 use log::warn;
 use lsp_types::request::Initialize;
-use lsp_types::{notification, CodeActionKind, ServerCapabilities};
 use lsp_types::{
     request::{self},
     InitializeParams,
 };
+use lsp_types::{CodeActionKind, ServerCapabilities};
 use parking_lot::{Mutex, RwLock};
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::io::{BufReader, BufWriter};
+use serde_json::Value;
+use tokio::io::AsyncReadExt;
+use tokio::io::BufReader;
 use tokio::process::{Child, ChildStdout, Command};
 use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
 use types::types::{
@@ -99,7 +100,7 @@ impl LanguageSeverProcess {
         let stdout = process.stdout.take().unwrap();
         Self::register_processe_stdout_handlers(
             stdout,
-            response_rx,
+            &response_rx,
             response_handlers.clone(),
             notification_handlers.clone(),
         );
@@ -151,7 +152,7 @@ impl LanguageSeverProcess {
 
     async fn register_processe_stdout_handlers(
         stdout: ChildStdout,
-        response_rx: UnboundedReceiver<String>,
+        response_rx: &UnboundedReceiver<String>,
         response_handlers: Arc<Mutex<Option<HashMap<LspRequestId, ResponseHandler>>>>,
         notification_handlers: Arc<Mutex<HashMap<&'static str, NotificationHandler>>>,
     ) -> anyhow::Result<()> {
@@ -175,17 +176,37 @@ impl LanguageSeverProcess {
             reader.read_exact(&mut buffer).await?;
 
             if let Ok(msg) = std::str::from_utf8(&buffer) {
-                log::trace!("Incoming lsp message");
+                log::trace!("Incoming lsp message {}", msg);
                 continue;
             }
 
             if let Ok(notification) = serde_json::from_slice::<AnyNotification>(&buffer) {
-                println!("{:?}", notification)
+                let mut notification_handlers = notification_handlers.lock();
+                if let Some(handler) = notification_handlers.get_mut(notification.method.as_str()) {
+                    handler(notification.id, notification.params.unwrap_or(Value::Null));
+                } else {
+                    drop(notification_handlers);
+                    warn!("Unhandled notification");
+                }
             } else if let Ok(AnyResponse {
                 id, result, error, ..
             }) = serde_json::from_slice(&buffer)
             {
-                println!("{:?}, {:?}, {:?}", id, result, error);
+                let mut response_handlers = response_handlers.lock();
+
+                if let Some(handler) = response_handlers
+                    .as_mut()
+                    .and_then(|handler| handler.remove(&id))
+                {
+                    drop(response_handlers);
+                    if let Some(err) = error {
+                        handler(Err(err));
+                    } else if let Some(result) = result {
+                        handler(Ok(result.get().into()));
+                    } else {
+                        handler(Ok("Null".into()));
+                    }
+                }
             } else {
                 warn!(
                     "Failed to deserialize lsp message: \n{}",
