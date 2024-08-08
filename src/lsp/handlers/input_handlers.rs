@@ -30,8 +30,8 @@ impl LspChannelInputHandler {
         }
     }
     async fn handler(
+        &mut self,
         stdout: ChildStdout,
-        response_handlers: Arc<Mutex<Option<HashMap<LspRequestId, ResponseHandler>>>>,
         channel_sender: UnboundedSender<AnyNotification>,
     ) -> anyhow::Result<()> {
         let mut reader = BufReader::new(stdout);
@@ -66,7 +66,7 @@ impl LspChannelInputHandler {
                 id, error, result, ..
             }) = serde_json::from_slice(&buffer)
             {
-                let mut response_handlers = response_handlers.lock();
+                let mut response_handlers = self.response_handlers.lock();
 
                 if let Some(handler) = response_handlers
                     .as_mut()
