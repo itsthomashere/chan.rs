@@ -3,7 +3,6 @@ pub mod types;
 
 use crate::types::types::LanguageServerBinary;
 use std::collections::HashMap;
-use std::io::Write;
 use std::path::PathBuf;
 use std::process::Stdio;
 use std::sync::atomic::AtomicI32;
@@ -11,18 +10,22 @@ use std::{path::Path, sync::Arc};
 
 use anyhow::{anyhow, Context};
 use handlers::input_handlers::read_headers;
+use log::warn;
 use lsp_types::request::Initialize;
+use lsp_types::{notification, CodeActionKind, ServerCapabilities};
 use lsp_types::{
     request::{self},
     InitializeParams,
 };
-use lsp_types::{CodeActionKind, ServerCapabilities};
 use parking_lot::{Mutex, RwLock};
-use tokio::io::AsyncWriteExt;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::io::{BufReader, BufWriter};
-use tokio::process::{Child, Command};
+use tokio::process::{Child, ChildStdout, Command};
 use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
-use types::types::{LspRequest, LspRequestId, LspResponse, CONTENT_LEN_HEADER, JSONPRC_VER};
+use types::types::{
+    AnyNotification, AnyResponse, LspRequest, LspRequestId, LspResponse, NotificationHandler,
+    ResponseHandler, CONTENT_LEN_HEADER, JSONPRC_VER,
+};
 
 pub struct LanguageSeverProcess {
     name: Arc<str>,
@@ -37,6 +40,8 @@ pub struct LanguageSeverProcess {
     notification_rx: UnboundedReceiver<String>,
     root_path: PathBuf,
     working_dir: PathBuf,
+    response_handlers: Arc<Mutex<Option<HashMap<LspRequestId, ResponseHandler>>>>,
+    notification_handlers: Arc<Mutex<HashMap<&'static str, NotificationHandler>>>,
 }
 impl LanguageSeverProcess {
     pub fn new(
@@ -77,7 +82,7 @@ impl LanguageSeverProcess {
     }
 
     fn binding_backend(
-        process: Child,
+        mut process: Child,
         root_path: &Path,
         working_dir: &Path,
         code_action_kinds: Option<Vec<CodeActionKind>>,
@@ -85,6 +90,19 @@ impl LanguageSeverProcess {
         let (request_tx, response_rx) = mpsc::unbounded_channel::<String>();
         let (notification_tx, notification_rx) = mpsc::unbounded_channel::<String>();
         let (err_tx, err_rx) = mpsc::unbounded_channel::<String>();
+        let response_handlers =
+            Arc::new(Mutex::new(Some(HashMap::<_, ResponseHandler>::default())));
+
+        let notification_handlers =
+            Arc::new(Mutex::new(HashMap::<_, NotificationHandler>::default()));
+
+        let stdout = process.stdout.take().unwrap();
+        Self::register_processe_stdout_handlers(
+            stdout,
+            response_rx,
+            response_handlers.clone(),
+            notification_handlers.clone(),
+        );
 
         Self {
             name: Arc::default(),
@@ -99,6 +117,8 @@ impl LanguageSeverProcess {
             err_rx,
             notification_tx,
             notification_rx,
+            response_handlers,
+            notification_handlers,
         }
     }
 
@@ -129,8 +149,52 @@ impl LanguageSeverProcess {
         Ok(())
     }
 
-    async fn register_request_tx() {}
-    async fn register_notification_channel() {}
-    async fn get_response() {}
+    async fn register_processe_stdout_handlers(
+        stdout: ChildStdout,
+        response_rx: UnboundedReceiver<String>,
+        response_handlers: Arc<Mutex<Option<HashMap<LspRequestId, ResponseHandler>>>>,
+        notification_handlers: Arc<Mutex<HashMap<&'static str, NotificationHandler>>>,
+    ) -> anyhow::Result<()> {
+        let mut reader = BufReader::new(stdout);
+        let mut buffer: Vec<u8> = Vec::new();
+
+        loop {
+            buffer.clear();
+            read_headers(&mut reader, &mut buffer).await?;
+            let header = std::str::from_utf8(&buffer)?;
+            let message_len: usize = header
+                .split('\n')
+                .find(|line| line.starts_with(CONTENT_LEN_HEADER))
+                .and_then(|line| line.strip_prefix(CONTENT_LEN_HEADER))
+                .ok_or_else(|| anyhow!("Invalid headers"))?
+                .trim_end()
+                .parse::<usize>()?;
+
+            buffer.resize(message_len, 0);
+
+            reader.read_exact(&mut buffer).await?;
+
+            if let Ok(msg) = std::str::from_utf8(&buffer) {
+                log::trace!("Incoming lsp message");
+                continue;
+            }
+
+            if let Ok(notification) = serde_json::from_slice::<AnyNotification>(&buffer) {
+                println!("{:?}", notification)
+            } else if let Ok(AnyResponse {
+                id, result, error, ..
+            }) = serde_json::from_slice(&buffer)
+            {
+                println!("{:?}, {:?}, {:?}", id, result, error);
+            } else {
+                warn!(
+                    "Failed to deserialize lsp message: \n{}",
+                    std::str::from_utf8(&buffer)?
+                );
+            }
+        }
+    }
+    async fn register_error_handlers(&mut self) {}
+    async fn register_notification_handlers(&mut self) {}
     async fn get_notification() {}
 }
