@@ -21,6 +21,7 @@ pub(crate) struct IoLoop {
     server: Arc<Mutex<Child>>,
     root_path: PathBuf,
     working_dir: PathBuf,
+    response_tx: UnboundedSender<String>,
 }
 
 impl IoLoop {
@@ -57,12 +58,13 @@ impl IoLoop {
         let stdout = process.stdout.take().unwrap();
 
         Self::attach_stdin(stdin, request_rx).await?;
-        Self::attach_stdout(stdout, response_tx).await?;
+        Self::attach_stdout(stdout, response_tx.clone()).await?;
 
         Ok(Self {
             server: Arc::new(Mutex::new(process)),
             root_path: root_path.to_path_buf(),
             working_dir: root_path.to_path_buf(),
+            response_tx: response_tx.clone(),
         })
     }
 
