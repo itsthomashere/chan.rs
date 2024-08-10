@@ -1,4 +1,5 @@
 pub mod handlers;
+pub mod ioloop;
 pub mod types;
 
 use crate::types::types::LanguageServerBinary;
@@ -103,7 +104,7 @@ impl LanguageSeverProcess {
             &response_rx,
             response_handlers.clone(),
             notification_handlers.clone(),
-        );
+        )?;
 
         Self {
             name: Arc::default(),

@@ -29,6 +29,8 @@ impl LspChannelInputHandler {
         Self {
             response_handlers,
             notification_handlers,
+            notification_channel: todo!(),
+            channel_sender: todo!(),
         }
     }
     async fn handler(
