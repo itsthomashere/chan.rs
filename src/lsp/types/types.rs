@@ -1,4 +1,6 @@
-use std::{collections::HashMap, ffi::OsString, path::PathBuf};
+use std::{
+    collections::HashMap, ffi::OsString, future::Future, path::PathBuf, pin::Pin, task::Poll,
+};
 
 use serde::{Deserialize, Serialize};
 use serde_json::{value::RawValue, Value};
@@ -33,7 +35,7 @@ pub enum LspRequestId {
 }
 
 #[derive(Deserialize, Serialize)]
-pub struct LspRequest<'a, T> {
+pub struct InternalLspRequest<'a, T> {
     pub jsonrpc: &'a str,
     pub id: LspRequestId,
     pub method: &'a str,
@@ -67,7 +69,7 @@ enum LspResult<T> {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Error {
-    message: String,
+    pub message: String,
 }
 #[derive(Deserialize, Serialize)]
 pub struct LspNotification<'a, T> {
@@ -84,4 +86,35 @@ pub struct AnyNotification {
     pub method: String,
     #[serde(default)]
     pub params: Option<Value>,
+}
+
+pub trait LspRequestFuture<O>: Future<Output = O> {
+    fn id(&self) -> i32;
+}
+
+pub struct LspRequest<F> {
+    id: i32,
+    request: F,
+}
+
+impl<F> LspRequest<F> {
+    pub fn new(id: i32, request: F) -> Self {
+        Self { id, request }
+    }
+}
+
+impl<F: Future> Future for LspRequest<F> {
+    type Output = F::Output;
+
+    fn poll(self: Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> Poll<Self::Output> {
+        // SAFETY: This is standard pin projection, we're pinned so our fields must be pinned.
+        let inner = unsafe { Pin::new_unchecked(&mut self.get_unchecked_mut().request) };
+        inner.poll(cx)
+    }
+}
+
+impl<F: Future> LspRequestFuture<F::Output> for LspRequest<F> {
+    fn id(&self) -> i32 {
+        self.id
+    }
 }
