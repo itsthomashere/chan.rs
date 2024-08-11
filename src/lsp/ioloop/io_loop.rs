@@ -74,13 +74,17 @@ impl IoLoop {
     ) -> anyhow::Result<()> {
         let mut buf_writer = BufWriter::new(stdin);
         let mut content_len_buffer = Vec::new();
+
         while let Some(req) = request_rx.recv().await {
             content_len_buffer.clear();
+
             write!(content_len_buffer, "{}", req.len()).unwrap();
+
             buf_writer.write_all(CONTENT_LEN_HEADER.as_bytes()).await?;
             buf_writer.write_all(&content_len_buffer).await?;
             buf_writer.write_all("\r\n\r\n".as_bytes()).await?;
             buf_writer.write_all(req.as_bytes()).await?;
+
             buf_writer.flush().await?;
         }
         Ok(())
