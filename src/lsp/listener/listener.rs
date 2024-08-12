@@ -1,19 +1,15 @@
 use std::{
     collections::HashMap,
     sync::{atomic::AtomicI32, Arc},
-    time::Instant,
 };
 
 use anyhow::{anyhow, Context};
 use log::warn;
 use lsp_types::request;
 use parking_lot::Mutex;
-use tokio::{
-    select,
-    sync::{
-        mpsc::{UnboundedReceiver, UnboundedSender},
-        oneshot,
-    },
+use tokio::sync::{
+    mpsc::{UnboundedReceiver, UnboundedSender},
+    oneshot,
 };
 
 use crate::types::types::{
@@ -40,6 +36,12 @@ impl Listener {
         )));
         let notification_handlers =
             Arc::new(Mutex::new(HashMap::<_, NotificationHandler>::default()));
+        Self::response_listener(
+            response_rx,
+            response_handlers.clone(),
+            notification_handlers.clone(),
+        )
+        .await?;
         Ok(Self {
             next_id: Default::default(),
             response_handlers,
@@ -90,7 +92,7 @@ impl Listener {
         Ok(())
     }
 
-    fn send_request<T: request::Request>(
+    async fn send_request<T: request::Request>(
         next_id: &AtomicI32,
         request_tx: UnboundedSender<String>,
         response_handlers: Arc<Mutex<Option<HashMap<LspRequestId, ResponseHandler>>>>,
