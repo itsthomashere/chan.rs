@@ -5,7 +5,7 @@ use std::{
 
 use anyhow::{anyhow, Context};
 use log::warn;
-use lsp_types::request;
+use lsp_types::{notification, request};
 use parking_lot::Mutex;
 use tokio::sync::{
     mpsc::{UnboundedReceiver, UnboundedSender},
@@ -151,4 +151,6 @@ impl Listener {
             };
         })
     }
+
+    async fn send_notification<T: notification::Notification>() {}
 }
