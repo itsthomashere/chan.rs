@@ -135,4 +135,16 @@ impl IoLoop {
             }
         }
     }
+
+    pub(crate) fn name(&self) -> &str {
+        &self.name
+    }
+
+    pub(crate) fn server_id(&self) -> ProccessId {
+        self.server_id
+    }
+
+    pub(crate) fn root_path(&self) -> &PathBuf {
+        &self.root_path
+    }
 }
