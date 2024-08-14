@@ -2,6 +2,7 @@ use std::{
     collections::HashMap, ffi::OsString, future::Future, path::PathBuf, pin::Pin, task::Poll,
 };
 
+use lsp_types::{CodeActionKind, ServerCapabilities};
 use serde::{Deserialize, Serialize};
 use serde_json::{value::RawValue, Value};
 
@@ -87,6 +88,11 @@ pub struct AnyNotification {
     pub method: String,
     #[serde(default)]
     pub params: Option<Value>,
+}
+
+pub struct AdapterServerCapabilities {
+    pub server_capabilities: ServerCapabilities,
+    pub code_action_kinds: Option<Vec<CodeActionKind>>,
 }
 
 pub trait LspRequestFuture<O>: Future<Output = O> {
