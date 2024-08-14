@@ -93,9 +93,9 @@ impl Listener {
     }
 
     async fn send_request<T: request::Request>(
+        &self,
         next_id: &AtomicI32,
         request_tx: UnboundedSender<String>,
-        response_handlers: Arc<Mutex<Option<HashMap<LspRequestId, ResponseHandler>>>>,
         params: T::Params,
     ) -> impl LspRequestFuture<anyhow::Result<T::Result>>
     where
@@ -111,7 +111,8 @@ impl Listener {
         })
         .unwrap();
         let (tx, mut rx) = oneshot::channel();
-        let handle_response = response_handlers
+        let handle_response = self
+            .response_handlers
             .lock()
             .as_mut()
             .ok_or_else(|| anyhow!("Server shutdown"))
@@ -119,7 +120,7 @@ impl Listener {
                 handler.insert(
                     LspRequestId::Int(id),
                     Box::new(move |result| {
-                        let _ = tokio::spawn(async move {
+                        tokio::spawn(async move {
                             let response = match result {
                                 Ok(response) => match serde_json::from_str(&response) {
                                     Ok(deserialize) => Ok(deserialize),
@@ -146,9 +147,9 @@ impl Listener {
             handle_response.unwrap_or_default();
             send.unwrap_or_default();
             match rx.try_recv() {
-                Ok(response) => return response,
-                Err(err) => return Err(err.into()),
-            };
+                Ok(response) => response,
+                Err(err) => Err(err.into()),
+            }
         })
     }
 
