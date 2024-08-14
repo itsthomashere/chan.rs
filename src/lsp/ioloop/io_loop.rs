@@ -14,19 +14,25 @@ use tokio::{
     sync::mpsc::{UnboundedReceiver, UnboundedSender},
 };
 
-use crate::types::types::LanguageServerBinary;
+use crate::types::types::{LanguageServerBinary, ProccessId};
 use crate::{handlers::input_handlers::read_headers, types::types::CONTENT_LEN_HEADER};
 
 pub(crate) struct IoLoop {
     server: Arc<Mutex<Child>>,
+    server_id: ProccessId,
+    name: Arc<str>,
+    stdin: Arc<ChildStdin>,
+    stdout: Arc<ChildStdout>,
     root_path: PathBuf,
     working_dir: PathBuf,
     response_tx: UnboundedSender<String>,
+    request_rx: UnboundedReceiver<String>,
 }
 
 impl IoLoop {
-    pub async fn new(
+    pub(crate) fn new(
         binary: LanguageServerBinary,
+        server_id: ProccessId,
         root_path: &Path,
         response_tx: UnboundedSender<String>,
         request_rx: UnboundedReceiver<String>,
@@ -37,6 +43,10 @@ impl IoLoop {
             root_path.parent().unwrap_or_else(|| Path::new("/"))
         };
 
+        let name = match binary.path.file_name() {
+            Some(name) => name.to_string_lossy().into(),
+            None => Arc::default(),
+        };
         let mut command = Command::new(&binary.path);
         command
             .current_dir(working_dir)
@@ -57,25 +67,24 @@ impl IoLoop {
         let stdin = process.stdin.take().unwrap();
         let stdout = process.stdout.take().unwrap();
 
-        Self::attach_stdin(stdin, request_rx).await?;
-        Self::attach_stdout(stdout, response_tx.clone()).await?;
-
         Ok(Self {
             server: Arc::new(Mutex::new(process)),
             root_path: root_path.to_path_buf(),
             working_dir: root_path.to_path_buf(),
-            response_tx: response_tx.clone(),
+            stdin: Arc::new(stdin),
+            stdout: Arc::new(stdout),
+            response_tx,
+            request_rx,
+            server_id,
+            name,
         })
     }
 
-    async fn attach_stdin(
-        stdin: ChildStdin,
-        mut request_rx: UnboundedReceiver<String>,
-    ) -> anyhow::Result<()> {
+    pub(crate) async fn attach_stdin(&mut self, stdin: ChildStdin) -> anyhow::Result<()> {
         let mut buf_writer = BufWriter::new(stdin);
         let mut content_len_buffer = Vec::new();
 
-        while let Some(req) = request_rx.recv().await {
+        while let Some(req) = self.request_rx.recv().await {
             content_len_buffer.clear();
 
             write!(content_len_buffer, "{}", req.len()).unwrap();
@@ -90,12 +99,10 @@ impl IoLoop {
         Ok(())
     }
 
-    async fn attach_stdout(
-        stdout: ChildStdout,
-        response_tx: UnboundedSender<String>,
-    ) -> anyhow::Result<()> {
+    pub(crate) async fn attach_stdout(&self, stdout: ChildStdout) -> anyhow::Result<()> {
         let mut buf_reader = BufReader::new(stdout);
         let mut buffer: Vec<u8> = Vec::new();
+
         loop {
             buffer.clear();
             read_headers(&mut buf_reader, &mut buffer).await?;
@@ -120,7 +127,7 @@ impl IoLoop {
             buf_reader.read_exact(&mut buffer).await?;
 
             if let Ok(msg) = std::str::from_utf8(&buffer) {
-                let response_tx = response_tx.clone();
+                let response_tx = self.response_tx.clone();
                 response_tx.send(msg.to_string())?;
             } else {
                 warn!("Failed to get message");
