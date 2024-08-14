@@ -24,7 +24,8 @@ pub struct LanguageServerBinary {
     pub args: Vec<OsString>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[repr(transparent)]
 pub struct ProccessId(pub usize);
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Serialize, Deserialize)]
