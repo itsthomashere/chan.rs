@@ -17,8 +17,8 @@ use tokio::{
 };
 
 use crate::types::types::{
-    AnyNotification, AnyResponse, InternalLspRequest, LspNotification, LspRequest,
-    LspRequestFuture, LspRequestId, NotificationHandler, ResponseHandler, JSONPRC_VER,
+    AnyNotification, AnyResponse, InternalLspRequest, LspNotification, LspRequest, LspRequestId,
+    NotificationHandler, ResponseHandler, JSONPRC_VER,
 };
 
 pub(crate) struct Listener {
@@ -26,7 +26,7 @@ pub(crate) struct Listener {
     response_handlers: Arc<Mutex<Option<HashMap<LspRequestId, ResponseHandler>>>>,
     notification_handlers: Arc<Mutex<HashMap<&'static str, NotificationHandler>>>,
     request_tx: UnboundedSender<String>,
-    response_task: Mutex<JoinHandle<anyhow::Result<(), anyhow::Error>>>,
+    response_task: Mutex<JoinHandle<Result<(), anyhow::Error>>>,
     output_tx: UnboundedSender<String>,
 }
 
@@ -174,9 +174,15 @@ impl Listener {
         })
         .unwrap();
         let tx = self.request_tx.clone();
-        let _ = tx.send(message);
-        let _ = tx.downgrade();
 
+        let mut handle_notification = self.notification_handlers.lock();
+        handle_notification.insert(
+            T::METHOD,
+            Box::new(move |_, _| {
+                let _ = tx.send(message.clone());
+                let _ = tx.downgrade();
+            }),
+        );
         Ok(())
     }
 }
