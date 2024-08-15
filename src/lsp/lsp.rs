@@ -9,9 +9,12 @@ use std::sync::Arc;
 
 use ioloop::io_loop::IoLoop;
 use listener::listener::Listener;
-use lsp_types::{CodeActionKind, ServerCapabilities};
+use lsp_types::request::Initialize;
+use lsp_types::{
+    notification, request, CodeActionKind, InitializeParams, InitializeResult, ServerCapabilities,
+};
 use parking_lot::RwLock;
-use tokio::sync::mpsc::unbounded_channel;
+use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver};
 use types::types::{AdapterServerCapabilities, LanguageServerBinary, ProccessId};
 
 pub struct LanguageSeverProcess {
@@ -19,6 +22,7 @@ pub struct LanguageSeverProcess {
     code_action_kinds: Option<Vec<CodeActionKind>>,
     io_loop: Arc<IoLoop>,
     listener: Arc<Listener>,
+    output_rx: UnboundedReceiver<String>,
 }
 impl LanguageSeverProcess {
     pub fn new(binary: LanguageServerBinary, root_path: &Path, server_id: ProccessId) -> Self {
@@ -33,7 +37,20 @@ impl LanguageSeverProcess {
             code_action_kinds: Default::default(),
             io_loop: Arc::new(io_loop),
             listener: Arc::new(listener),
+            output_rx,
         }
+    }
+
+    pub async fn initialize(&self, params: InitializeParams) -> InitializeResult {
+        Self::request::<Initialize>(self, params).await
+    }
+
+    pub async fn request<T: request::Request>(&self, params: T::Params) -> T::Result {
+        self.listener.send_request::<T>(params).await.unwrap()
+    }
+
+    pub async fn notify<T: notification::Notification>(&self, params: T::Params) {
+        self.listener.send_notification::<T>(params).await.unwrap()
     }
 
     pub fn name(&self) -> &str {
@@ -46,6 +63,10 @@ impl LanguageSeverProcess {
 
     pub fn root_path(&self) -> &PathBuf {
         self.io_loop.root_path()
+    }
+
+    pub fn working_dir(&self) -> &PathBuf {
+        self.io_loop.working_dir()
     }
 
     pub fn capabilities(&self) -> ServerCapabilities {
