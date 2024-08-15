@@ -1,5 +1,6 @@
 use std::{
     collections::HashMap,
+    future::Future,
     sync::{atomic::AtomicI32, Arc},
 };
 
@@ -7,9 +8,12 @@ use anyhow::{anyhow, Context};
 use log::warn;
 use lsp_types::{notification, request};
 use parking_lot::Mutex;
-use tokio::sync::{
-    mpsc::{UnboundedReceiver, UnboundedSender},
-    oneshot,
+use tokio::{
+    sync::{
+        mpsc::{UnboundedReceiver, UnboundedSender},
+        oneshot,
+    },
+    task::{yield_now, JoinHandle},
 };
 
 use crate::types::types::{
@@ -22,7 +26,7 @@ pub(crate) struct Listener {
     response_handlers: Arc<Mutex<Option<HashMap<LspRequestId, ResponseHandler>>>>,
     notification_handlers: Arc<Mutex<HashMap<&'static str, NotificationHandler>>>,
     request_tx: UnboundedSender<String>,
-    response_rx: UnboundedReceiver<String>,
+    response_task: Mutex<JoinHandle<anyhow::Result<(), anyhow::Error>>>,
     output_tx: UnboundedSender<String>,
 }
 
@@ -38,23 +42,33 @@ impl Listener {
         let notification_handlers =
             Arc::new(Mutex::new(HashMap::<_, NotificationHandler>::default()));
 
+        let response_task = tokio::spawn({
+            let response_handlers = response_handlers.clone();
+            let notification_handlers = notification_handlers.clone();
+            Self::response_listener(response_handlers, notification_handlers, response_rx)
+        });
+
         Ok(Self {
             next_id: Default::default(),
             response_handlers,
             notification_handlers,
             request_tx,
             output_tx,
-            response_rx,
+            response_task: Mutex::new(response_task),
         })
     }
 
-    pub(crate) async fn response_listener(&mut self) -> anyhow::Result<()> {
-        while let Some(msg) = self.response_rx.recv().await {
+    pub(crate) async fn response_listener(
+        response_handlers: Arc<Mutex<Option<HashMap<LspRequestId, ResponseHandler>>>>,
+        notification_handlers: Arc<Mutex<HashMap<&'static str, NotificationHandler>>>,
+        mut response_rx: UnboundedReceiver<String>,
+    ) -> anyhow::Result<()> {
+        while let Some(msg) = response_rx.recv().await {
             if let Ok(AnyResponse {
                 id, error, result, ..
             }) = serde_json::from_str(&msg)
             {
-                let mut response_handlers = self.response_handlers.lock();
+                let mut response_handlers = response_handlers.lock();
                 if let Some(handler) = response_handlers
                     .as_mut()
                     .and_then(|handler| handler.remove(&id))
@@ -71,7 +85,7 @@ impl Listener {
             } else if let Ok(AnyNotification { id, method, params }) =
                 serde_json::from_str::<AnyNotification>(&msg)
             {
-                let mut notification_handlers = self.notification_handlers.lock();
+                let mut notification_handlers = notification_handlers.lock();
                 if let Some(mut handler) = notification_handlers.remove(method.as_str()) {
                     drop(notification_handlers);
                     if let Some(params) = params {
@@ -81,6 +95,7 @@ impl Listener {
             } else {
                 warn!("Failed to deserialize lsp message:\n {}", msg);
             }
+            yield_now().await;
         }
         Ok(())
     }
@@ -88,7 +103,7 @@ impl Listener {
     pub(crate) async fn send_request<T: request::Request>(
         &self,
         params: T::Params,
-    ) -> impl LspRequestFuture<anyhow::Result<T::Result>>
+    ) -> anyhow::Result<T::Result>
     where
         T::Result: 'static + Send,
     {
@@ -129,8 +144,9 @@ impl Listener {
                             _ = tx.send(response);
                         });
                     }),
-                )
+                );
             });
+        yield_now().await;
         let send = request_tx
             .send(message)
             .context("Failed to write to language server stdin through the io loop");
@@ -144,9 +160,10 @@ impl Listener {
                 Err(err) => Err(err.into()),
             }
         })
+        .await
     }
 
-    async fn send_notification<T: notification::Notification>(
+    pub(crate) async fn send_notification<T: notification::Notification>(
         &self,
         params: T::Params,
     ) -> anyhow::Result<()> {
