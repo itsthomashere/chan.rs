@@ -8,7 +8,7 @@ use log::warn;
 use parking_lot::Mutex;
 use tokio::io::AsyncWriteExt;
 use tokio::process::{Child, Command};
-use tokio::task::JoinHandle;
+use tokio::task::{yield_now, JoinHandle};
 use tokio::{
     io::{AsyncReadExt, BufReader, BufWriter},
     process::{ChildStdin, ChildStdout},
@@ -97,6 +97,7 @@ impl IoLoop {
 
             buf_writer.flush().await?;
         }
+        yield_now().await;
         Ok(())
     }
 
@@ -137,6 +138,7 @@ impl IoLoop {
                 warn!("Failed to get message");
                 continue;
             }
+            yield_now().await;
         }
     }
 
