@@ -35,7 +35,7 @@ impl Listener {
         response_rx: UnboundedReceiver<String>,
         request_tx: UnboundedSender<String>,
         output_tx: UnboundedSender<String>,
-    ) -> anyhow::Result<Self> {
+    ) -> Self {
         let response_handlers = Arc::new(Mutex::new(Some(
             HashMap::<LspRequestId, ResponseHandler>::default(),
         )));
@@ -48,14 +48,14 @@ impl Listener {
             Self::response_listener(response_handlers, notification_handlers, response_rx)
         });
 
-        Ok(Self {
+        Self {
             next_id: Default::default(),
             response_handlers,
             notification_handlers,
             request_tx,
             output_tx,
             response_task: Mutex::new(response_task),
-        })
+        }
     }
 
     pub(crate) async fn response_listener(

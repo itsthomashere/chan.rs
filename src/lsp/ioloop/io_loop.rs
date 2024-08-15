@@ -34,7 +34,7 @@ impl IoLoop {
         root_path: &Path,
         response_tx: UnboundedSender<String>,
         request_rx: UnboundedReceiver<String>,
-    ) -> anyhow::Result<Self> {
+    ) -> Self {
         let working_dir = if root_path.is_dir() {
             root_path
         } else {
@@ -55,12 +55,15 @@ impl IoLoop {
             .stderr(Stdio::piped())
             .kill_on_drop(true);
 
-        let mut process = command.spawn().with_context(|| {
-            format!(
-                "failed to spawn command. path: {:?}, working directory: {:?}, args: {:?}",
-                binary.path, working_dir, &binary.args
-            )
-        })?;
+        let mut process = command
+            .spawn()
+            .with_context(|| {
+                format!(
+                    "failed to spawn command. path: {:?}, working directory: {:?}, args: {:?}",
+                    binary.path, working_dir, &binary.args
+                )
+            })
+            .unwrap();
 
         let stdin = process.stdin.take().unwrap();
         let stdout = process.stdout.take().unwrap();
@@ -68,14 +71,14 @@ impl IoLoop {
         let stdout_task = tokio::spawn(Self::attach_stdin(request_rx, stdin));
         let stdin_task = tokio::spawn(Self::attach_stdout(response_tx.clone(), stdout));
 
-        Ok(Self {
+        Self {
             server: Arc::new(Mutex::new(process)),
             root_path: root_path.to_path_buf(),
             working_dir: root_path.to_path_buf(),
             io_task: Mutex::new(Some((stdin_task, stdout_task))),
             server_id,
             name,
-        })
+        }
     }
 
     pub(crate) async fn attach_stdin(

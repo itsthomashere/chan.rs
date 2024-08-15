@@ -29,8 +29,8 @@ impl LanguageSeverProcess {
         let (request_tx, request_rx) = unbounded_channel::<String>();
         let (response_tx, response_rx) = unbounded_channel::<String>();
         let (output_tx, output_rx) = unbounded_channel::<String>();
-        let listener = Listener::new(response_rx, request_tx, output_tx).unwrap();
-        let io_loop = IoLoop::new(binary, server_id, root_path, response_tx, request_rx).unwrap();
+        let io_loop = IoLoop::new(binary, server_id, root_path, response_tx, request_rx);
+        let listener = Listener::new(response_rx, request_tx, output_tx);
 
         Self {
             capabilities: Default::default(),
@@ -41,8 +41,8 @@ impl LanguageSeverProcess {
         }
     }
 
-    pub async fn initialize(&self, params: InitializeParams) -> InitializeResult {
-        Self::request::<Initialize>(self, params).await
+    pub async fn initialize(&self) -> InitializeResult {
+        Self::request::<Initialize>(self, InitializeParams::default()).await
     }
 
     pub async fn request<T: request::Request>(&self, params: T::Params) -> T::Result {
