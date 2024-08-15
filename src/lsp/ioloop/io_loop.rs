@@ -3,11 +3,12 @@ use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::Arc;
 
-use anyhow::{anyhow, Context};
+use anyhow::{anyhow, Context, Error};
 use log::warn;
 use parking_lot::Mutex;
 use tokio::io::AsyncWriteExt;
 use tokio::process::{Child, Command};
+use tokio::task::JoinHandle;
 use tokio::{
     io::{AsyncReadExt, BufReader, BufWriter},
     process::{ChildStdin, ChildStdout},
@@ -21,12 +22,9 @@ pub(crate) struct IoLoop {
     server: Arc<Mutex<Child>>,
     server_id: ProccessId,
     name: Arc<str>,
-    stdin: Arc<ChildStdin>,
-    stdout: Arc<ChildStdout>,
     root_path: PathBuf,
     working_dir: PathBuf,
-    response_tx: UnboundedSender<String>,
-    request_rx: UnboundedReceiver<String>,
+    io_task: Mutex<Option<(JoinHandle<Result<(), Error>>, JoinHandle<Result<(), Error>>)>>,
 }
 
 impl IoLoop {
@@ -67,24 +65,27 @@ impl IoLoop {
         let stdin = process.stdin.take().unwrap();
         let stdout = process.stdout.take().unwrap();
 
+        let stdout_task = tokio::spawn(Self::attach_stdin(request_rx, stdin));
+        let stdin_task = tokio::spawn(Self::attach_stdout(response_tx.clone(), stdout));
+
         Ok(Self {
             server: Arc::new(Mutex::new(process)),
             root_path: root_path.to_path_buf(),
             working_dir: root_path.to_path_buf(),
-            stdin: Arc::new(stdin),
-            stdout: Arc::new(stdout),
-            response_tx,
-            request_rx,
+            io_task: Mutex::new(Some((stdin_task, stdout_task))),
             server_id,
             name,
         })
     }
 
-    pub(crate) async fn attach_stdin(&mut self, stdin: ChildStdin) -> anyhow::Result<()> {
+    pub(crate) async fn attach_stdin(
+        mut request_rx: UnboundedReceiver<String>,
+        stdin: ChildStdin,
+    ) -> anyhow::Result<()> {
         let mut buf_writer = BufWriter::new(stdin);
         let mut content_len_buffer = Vec::new();
 
-        while let Some(req) = self.request_rx.recv().await {
+        while let Some(req) = request_rx.recv().await {
             content_len_buffer.clear();
 
             write!(content_len_buffer, "{}", req.len()).unwrap();
@@ -99,7 +100,10 @@ impl IoLoop {
         Ok(())
     }
 
-    pub(crate) async fn attach_stdout(&self, stdout: ChildStdout) -> anyhow::Result<()> {
+    pub(crate) async fn attach_stdout(
+        response_tx: UnboundedSender<String>,
+        stdout: ChildStdout,
+    ) -> anyhow::Result<()> {
         let mut buf_reader = BufReader::new(stdout);
         let mut buffer: Vec<u8> = Vec::new();
 
@@ -127,7 +131,7 @@ impl IoLoop {
             buf_reader.read_exact(&mut buffer).await?;
 
             if let Ok(msg) = std::str::from_utf8(&buffer) {
-                let response_tx = self.response_tx.clone();
+                let response_tx = response_tx.clone();
                 response_tx.send(msg.to_string())?;
             } else {
                 warn!("Failed to get message");
@@ -146,5 +150,9 @@ impl IoLoop {
 
     pub(crate) fn root_path(&self) -> &PathBuf {
         &self.root_path
+    }
+
+    pub(crate) fn working_dir(&self) -> &PathBuf {
+        &self.working_dir
     }
 }
