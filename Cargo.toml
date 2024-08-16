@@ -6,11 +6,8 @@ edition = "2021"
 [lib]
 path= "src/lsp/lsp.rs"
 doctest= false
-
-
 [dependencies]
 anyhow = "1.0.86"
-async-trait = "0.1.81"
 log = "0.4.22"
 lsp-types = "0.97.0"
 parking_lot = "0.12.3"

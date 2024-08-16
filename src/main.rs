@@ -10,7 +10,7 @@ use liblspc::{types::types::LanguageServerBinary, LanguageSeverProcess};
 #[tokio::main]
 async fn main() -> Result<()> {
     let binary = LanguageServerBinary {
-        path: PathBuf::from(OsString::from("clangd")),
+        path: PathBuf::from(OsString::from("rust-analyzer")),
         envs: None,
         args: Vec::new(),
     };
