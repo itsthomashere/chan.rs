@@ -120,7 +120,7 @@ impl Listener {
             params,
         })
         .unwrap();
-        let (tx, mut rx) = oneshot::channel();
+        let (tx, rx) = oneshot::channel();
         let handle_response = self
             .response_handlers
             .lock()
@@ -143,7 +143,7 @@ impl Listener {
                                 },
                                 Err(err) => Err(anyhow!("{}", err.message)),
                             };
-                            _ = tx.send(response);
+                            let _ = tx.send(response);
                         });
                     }),
                 );
