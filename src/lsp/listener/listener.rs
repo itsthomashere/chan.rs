@@ -1,6 +1,6 @@
 use std::{
     collections::HashMap,
-    future::Future,
+    future::{Future, IntoFuture},
     sync::{atomic::AtomicI32, Arc},
 };
 
@@ -155,7 +155,7 @@ impl Listener {
         LspRequest::new(id, async move {
             handle_response.unwrap_or_default();
             send.unwrap_or_default();
-            match rx.try_recv() {
+            match rx.into_future().await {
                 Ok(response) => response,
                 Err(err) => Err(err.into()),
             }
