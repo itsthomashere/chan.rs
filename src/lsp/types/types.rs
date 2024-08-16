@@ -1,5 +1,6 @@
 use std::{
     collections::HashMap, ffi::OsString, future::Future, path::PathBuf, pin::Pin, task::Poll,
+    time::Duration,
 };
 
 use lsp_types::{CodeActionKind, ServerCapabilities};
@@ -7,6 +8,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{value::RawValue, Value};
 
 pub const CONTENT_LEN_HEADER: &str = "Content-Length: ";
+pub const LSP_REQUEST_TIMEOUT: Duration = Duration::from_secs(5);
 pub const JSONPRC_VER: &str = "2.0";
 pub const HEADER_DELIMITER: &[u8; 4] = b"\r\n\r\n";
 pub type NotificationHandler = Box<dyn Send + FnMut(Option<LspRequestId>, Value)>;

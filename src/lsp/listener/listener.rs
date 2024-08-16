@@ -2,6 +2,7 @@ use std::{
     collections::HashMap,
     future::{Future, IntoFuture},
     sync::{atomic::AtomicI32, Arc},
+    time::Duration,
 };
 
 use anyhow::{anyhow, Context};
@@ -9,6 +10,7 @@ use log::warn;
 use lsp_types::{notification, request};
 use parking_lot::Mutex;
 use tokio::{
+    select,
     sync::{
         mpsc::{UnboundedReceiver, UnboundedSender},
         oneshot,
@@ -18,7 +20,7 @@ use tokio::{
 
 use crate::types::types::{
     AnyNotification, AnyResponse, InternalLspRequest, LspNotification, LspRequest, LspRequestId,
-    NotificationHandler, ResponseHandler, JSONPRC_VER,
+    NotificationHandler, ResponseHandler, JSONPRC_VER, LSP_REQUEST_TIMEOUT,
 };
 
 pub(crate) struct Listener {
@@ -118,7 +120,7 @@ impl Listener {
             params,
         })
         .unwrap();
-        let (tx, mut rx) = oneshot::channel();
+        let (tx, rx) = oneshot::channel();
         let handle_response = self
             .response_handlers
             .lock()
@@ -155,12 +157,21 @@ impl Listener {
         LspRequest::new(id, async move {
             handle_response.unwrap_or_default();
             send.unwrap_or_default();
-            match rx.into_future().await {
-                Ok(response) => response,
-                Err(err) => Err(err.into()),
-            }
         })
-        .await
+        .await;
+        select! {
+            response = rx.into_future() => {
+                match response {
+                    Ok(res) => res,
+                    Err(e) => Err(e.into()),
+                }
+            }
+                _ = tokio::spawn(async move {
+                    tokio::time::sleep(LSP_REQUEST_TIMEOUT).await
+                }) => {
+                    anyhow::bail!("Lsp request timed out");
+                }
+        }
     }
 
     pub(crate) async fn send_notification<T: notification::Notification>(
