@@ -120,7 +120,7 @@ impl Listener {
             params,
         })
         .unwrap();
-        let (tx, rx) = oneshot::channel();
+        let (tx, mut rx) = oneshot::channel();
         let handle_response = self
             .response_handlers
             .lock()
@@ -154,23 +154,29 @@ impl Listener {
             .context("Failed to write to language server stdin through the io loop");
 
         let _ = request_tx.downgrade();
-        LspRequest::new(id, async move {
+
+        let response_handle = tokio::spawn(async move {
             handle_response.unwrap_or_default();
             send.unwrap_or_default();
-        })
-        .await;
+            match rx.into_future().await {
+                Ok(response) => response,
+                Err(e) => Err(e.into()),
+            }
+        });
+        let time_out = tokio::spawn(async move {
+            tokio::time::sleep(LSP_REQUEST_TIMEOUT).await;
+        });
+
         select! {
-            response = rx.into_future() => {
+            response = response_handle => {
                 match response {
                     Ok(res) => res,
                     Err(e) => Err(e.into()),
                 }
             }
-                _ = tokio::spawn(async move {
-                    tokio::time::sleep(LSP_REQUEST_TIMEOUT).await
-                }) => {
-                    anyhow::bail!("Lsp request timed out");
-                }
+            _ = time_out => {
+                anyhow::bail!("Lsp request timed out");
+            }
         }
     }
 
