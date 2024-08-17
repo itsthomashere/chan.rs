@@ -88,3 +88,9 @@ impl LanguageSeverProcess {
         update(self.capabilities.write().deref_mut())
     }
 }
+
+impl Drop for LanguageSeverProcess {
+    fn drop(&mut self) {
+        self.output_rx.close();
+    }
+}

@@ -161,3 +161,19 @@ impl IoLoop {
         &self.working_dir
     }
 }
+
+impl Drop for IoLoop {
+    fn drop(&mut self) {
+        if let Some((a, b)) = self.io_task.lock().as_mut() {
+            a.abort();
+            b.abort();
+        } else {
+            warn!("No io handler found");
+        };
+
+        self.server
+            .lock()
+            .start_kill()
+            .unwrap_or_else(|e| warn!("Failed to kill process. Error: {:?}", e));
+    }
+}

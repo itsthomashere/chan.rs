@@ -1,8 +1,7 @@
 use std::{
     collections::HashMap,
-    future::{Future, IntoFuture},
+    future::IntoFuture,
     sync::{atomic::AtomicI32, Arc},
-    time::Duration,
 };
 
 use anyhow::{anyhow, Context};
@@ -19,7 +18,7 @@ use tokio::{
 };
 
 use crate::types::types::{
-    AnyNotification, AnyResponse, InternalLspRequest, LspNotification, LspRequest, LspRequestId,
+    AnyNotification, AnyResponse, InternalLspRequest, LspNotification, LspRequestId,
     NotificationHandler, ResponseHandler, JSONPRC_VER, LSP_REQUEST_TIMEOUT,
 };
 
@@ -201,5 +200,12 @@ impl Listener {
             }),
         );
         Ok(())
+    }
+}
+
+impl Drop for Listener {
+    fn drop(&mut self) {
+        self.response_task.lock().abort();
+        let _ = self.output_tx.downgrade();
     }
 }
