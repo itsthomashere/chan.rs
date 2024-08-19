@@ -41,16 +41,22 @@ impl LanguageSeverProcess {
         }
     }
 
-    pub async fn initialize(&self) -> InitializeResult {
+    pub async fn initialize(&self) -> anyhow::Result<InitializeResult> {
         Self::request::<Initialize>(self, InitializeParams::default()).await
     }
 
-    pub async fn request<T: request::Request>(&self, params: T::Params) -> T::Result {
-        self.listener.send_request::<T>(params).await.unwrap()
+    pub async fn request<T: request::Request>(
+        &self,
+        params: T::Params,
+    ) -> anyhow::Result<T::Result> {
+        self.listener.send_request::<T>(params).await
     }
 
-    pub async fn notify<T: notification::Notification>(&self, params: T::Params) {
-        self.listener.send_notification::<T>(params).await.unwrap()
+    pub async fn notify<T: notification::Notification>(
+        &self,
+        params: T::Params,
+    ) -> anyhow::Result<()> {
+        self.listener.send_notification::<T>(params).await
     }
 
     pub fn name(&self) -> &str {
