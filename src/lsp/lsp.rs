@@ -47,16 +47,6 @@ impl LanguageSeverProcess {
         Self::request::<Initialize>(self, InitializeParams::default()).await
     }
 
-    pub fn on_request<T, F>(&self, f: F) -> Subscription
-    where
-        T: request::Request,
-        T::Params: 'static + Send,
-        F: 'static + FnMut(T::Params) -> anyhow::Result<T::Result> + Send,
-        T::Result: 'static + Send,
-    {
-        self.listener.on_request(T::METHOD, f)
-    }
-
     pub fn on_notification<F, Params>(&self, method: &'static str, f: F) -> Subscription
     where
         F: 'static + FnMut(Params) + Send,

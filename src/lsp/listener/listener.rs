@@ -239,77 +239,13 @@ impl Listener {
         }
     }
 
-    pub(crate) fn on_request<F, Res, Params>(&self, method: &'static str, mut f: F) -> Subscription
-    where
-        F: 'static + FnMut(Params) -> anyhow::Result<Res> + Send,
-        Params: DeserializeOwned + Send + 'static,
-        Res: 'static + Serialize + Send,
-    {
-        let output_tx = self.output_tx.clone();
-        let previous_handler = self.notification_handlers.lock().insert(
-            method,
-            Box::new(move |id, params| {
-                println!("id: {:?}. Params: {:?}", id, params);
-                if let Some(id) = id {
-                    match serde_json::from_value::<Params>(params) {
-                        Ok(params) => {
-                            let response = f(params);
-                            tokio::spawn({
-                                let output_tx = output_tx.clone();
-                                async move {
-                                    let response = match response {
-                                        Ok(result) => LspResponse {
-                                            jsonrpc: JSONPRC_VER,
-                                            id,
-                                            value: LspResult::Ok(Some(result)),
-                                        },
-                                        Err(error) => LspResponse {
-                                            jsonrpc: JSONPRC_VER,
-                                            id,
-                                            value: LspResult::Error(Some(Error {
-                                                message: error.to_string(),
-                                            })),
-                                        },
-                                    };
-                                    if let Ok(response) = serde_json::to_string(&response) {
-                                        println!("{}", response);
-                                        output_tx.send(response).ok();
-                                    }
-                                    yield_now().await;
-                                }
-                            });
-                        }
-                        Err(error) => {
-                            log::error!("error deserializing {} request {:?}", method, error);
-                            let response = AnyResponse {
-                                jsonrpc: JSONPRC_VER,
-                                id,
-                                result: None,
-                                error: Some(Error {
-                                    message: error.to_string(),
-                                }),
-                            };
-                            if let Ok(response) = serde_json::to_string(&response) {
-                                output_tx.send(response).ok();
-                            }
-                        }
-                    }
-                } else {
-                    println!("Failed");
-                }
-            }),
-        );
-
-        assert!(
-            previous_handler.is_none(),
-            "Registered multiple hanlers for the same methods"
-        );
-
-        Subscription::Notification {
-            method,
-            notification_handlers: Some(self.notification_handlers.clone()),
-        }
-    }
+    // pub(crate) fn on_request<F, Res, Params>(&self, method: &'static str, mut f: F) -> Subscription
+    // where
+    //     F: 'static + FnMut(Params) -> anyhow::Result<Res> + Send,
+    //     Params: DeserializeOwned + Send + 'static,
+    //     Res: 'static + Serialize + Send,
+    // {
+    // }
 }
 
 impl Drop for Listener {
