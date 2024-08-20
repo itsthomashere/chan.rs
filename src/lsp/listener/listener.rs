@@ -140,7 +140,7 @@ impl Listener {
                                         Err(err).context("Failed to deserialize message")
                                     }
                                 },
-                                Err(err) => Err(anyhow!("{}", err.message)),
+                                Err(err) => Err(anyhow!("{:?}", err)),
                             };
                             let _ = tx.send(response);
                         });
