@@ -1,7 +1,6 @@
 use std::{
     collections::HashMap,
-    fmt::Debug,
-    future::{Future, IntoFuture},
+    future::IntoFuture,
     sync::{atomic::AtomicI32, Arc},
 };
 
@@ -240,21 +239,17 @@ impl Listener {
         }
     }
 
-    pub(crate) fn on_request<F, Res, Params, Fut>(
-        &self,
-        method: &'static str,
-        mut f: F,
-    ) -> Subscription
+    pub(crate) fn on_request<F, Res, Params>(&self, method: &'static str, mut f: F) -> Subscription
     where
-        F: 'static + FnMut(Params) -> Fut + Send,
-        Fut: 'static + Send + Future<Output = anyhow::Result<Res>>,
+        F: 'static + FnMut(Params) -> anyhow::Result<Res> + Send,
         Params: DeserializeOwned + Send + 'static,
-        Res: Serialize,
+        Res: 'static + Serialize + Send,
     {
         let output_tx = self.output_tx.clone();
         let previous_handler = self.notification_handlers.lock().insert(
             method,
             Box::new(move |id, params| {
+                println!("id: {:?}. Params: {:?}", id, params);
                 if let Some(id) = id {
                     match serde_json::from_value::<Params>(params) {
                         Ok(params) => {
@@ -262,7 +257,7 @@ impl Listener {
                             tokio::spawn({
                                 let output_tx = output_tx.clone();
                                 async move {
-                                    let response = match response.await {
+                                    let response = match response {
                                         Ok(result) => LspResponse {
                                             jsonrpc: JSONPRC_VER,
                                             id,
@@ -277,8 +272,10 @@ impl Listener {
                                         },
                                     };
                                     if let Ok(response) = serde_json::to_string(&response) {
+                                        println!("{}", response);
                                         output_tx.send(response).ok();
                                     }
+                                    yield_now().await;
                                 }
                             });
                         }
@@ -297,6 +294,8 @@ impl Listener {
                             }
                         }
                     }
+                } else {
+                    println!("Failed");
                 }
             }),
         );
