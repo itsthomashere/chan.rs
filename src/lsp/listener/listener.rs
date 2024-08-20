@@ -1,6 +1,6 @@
 use std::{
     collections::HashMap,
-    future::IntoFuture,
+    future::{Future, IntoFuture},
     sync::{atomic::AtomicI32, Arc},
 };
 
@@ -8,6 +8,7 @@ use anyhow::{anyhow, Context};
 use log::warn;
 use lsp_types::{notification, request};
 use parking_lot::Mutex;
+use serde::{de::DeserializeOwned, Serialize};
 use tokio::{
     select,
     sync::{
@@ -18,8 +19,9 @@ use tokio::{
 };
 
 use crate::types::types::{
-    AnyNotification, AnyResponse, InternalLspRequest, LspNotification, LspRequestId,
-    NotificationHandler, ResponseHandler, JSONPRC_VER, LSP_REQUEST_TIMEOUT,
+    AnyNotification, AnyResponse, Error, InternalLspRequest, LspNotification, LspRequestId,
+    LspResponse, LspResult, NotificationHandler, ResponseHandler, Subscription, JSONPRC_VER,
+    LSP_REQUEST_TIMEOUT,
 };
 
 pub(crate) struct Listener {
@@ -210,6 +212,102 @@ impl Listener {
         }
 
         Ok(())
+    }
+
+    pub(crate) fn on_notification<F, Params>(&self, method: &'static str, mut f: F) -> Subscription
+    where
+        F: 'static + FnMut(Params) + Send,
+        Params: DeserializeOwned,
+    {
+        let previous_handler = self.notification_handlers.lock().insert(
+            method,
+            Box::new(move |_, params| {
+                if let Ok(params) = serde_json::from_value::<Params>(params) {
+                    f(params);
+                };
+            }),
+        );
+        assert!(
+            previous_handler.is_none(),
+            "Registered multiple hanlers for the same methods"
+        );
+
+        Subscription::Notification {
+            method,
+            notification_handlers: Some(self.notification_handlers.clone()),
+        }
+    }
+
+    pub(crate) fn on_request<F, Res, Params, Fut>(
+        &self,
+        method: &'static str,
+        mut f: F,
+    ) -> Subscription
+    where
+        F: 'static + FnMut(Params) -> Fut + Send,
+        Fut: 'static + Send + Future<Output = anyhow::Result<Res>>,
+        Params: DeserializeOwned + Send + 'static,
+        Res: Serialize,
+    {
+        let output_tx = self.output_tx.clone();
+        let previous_handler = self.notification_handlers.lock().insert(
+            method,
+            Box::new(move |id, params| {
+                if let Some(id) = id {
+                    match serde_json::from_value::<Params>(params) {
+                        Ok(params) => {
+                            let response = f(params);
+                            tokio::spawn({
+                                let output_tx = output_tx.clone();
+                                async move {
+                                    let response = match response.await {
+                                        Ok(result) => LspResponse {
+                                            jsonrpc: JSONPRC_VER,
+                                            id,
+                                            value: LspResult::Ok(Some(result)),
+                                        },
+                                        Err(error) => LspResponse {
+                                            jsonrpc: JSONPRC_VER,
+                                            id,
+                                            value: LspResult::Error(Some(Error {
+                                                message: error.to_string(),
+                                            })),
+                                        },
+                                    };
+                                    if let Ok(response) = serde_json::to_string(&response) {
+                                        output_tx.send(response).ok();
+                                    }
+                                }
+                            });
+                        }
+                        Err(error) => {
+                            log::error!("error deserializing {} request {:?}", method, error);
+                            let response = AnyResponse {
+                                jsonrpc: JSONPRC_VER,
+                                id,
+                                result: None,
+                                error: Some(Error {
+                                    message: error.to_string(),
+                                }),
+                            };
+                            if let Ok(response) = serde_json::to_string(&response) {
+                                output_tx.send(response).ok();
+                            }
+                        }
+                    }
+                }
+            }),
+        );
+
+        assert!(
+            previous_handler.is_none(),
+            "Registered multiple hanlers for the same methods"
+        );
+
+        Subscription::Notification {
+            method,
+            notification_handlers: Some(self.notification_handlers.clone()),
+        }
     }
 }
 

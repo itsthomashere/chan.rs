@@ -1,6 +1,7 @@
-use std::{collections::HashMap, ffi::OsString, path::PathBuf, time::Duration};
+use std::{collections::HashMap, ffi::OsString, path::PathBuf, sync::Arc, time::Duration};
 
 use lsp_types::{CodeActionKind, ServerCapabilities};
+use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
 use serde_json::{value::RawValue, Value};
 
@@ -54,23 +55,23 @@ pub struct AnyResponse<'a> {
 }
 #[derive(Debug, Serialize, Deserialize)]
 pub struct LspResponse<'a, T> {
-    jsonrpc: &'a str,
-    id: LspRequestId,
+    pub(crate) jsonrpc: &'a str,
+    pub(crate) id: LspRequestId,
     #[serde(flatten)]
-    value: LspResult<T>,
+    pub(crate) value: LspResult<T>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-enum LspResult<T> {
+pub(crate) enum LspResult<T> {
     #[serde(rename = "result")]
     Ok(Option<T>),
     Error(Option<Error>),
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-pub struct Error {
-    pub message: String,
+pub(crate) struct Error {
+    pub(crate) message: String,
 }
 #[derive(Deserialize, Serialize)]
 pub struct LspNotification<'a, T> {
@@ -92,4 +93,11 @@ pub struct AnyNotification {
 pub struct AdapterServerCapabilities {
     pub server_capabilities: ServerCapabilities,
     pub code_action_kinds: Option<Vec<CodeActionKind>>,
+}
+
+pub enum Subscription {
+    Notification {
+        method: &'static str,
+        notification_handlers: Option<Arc<Mutex<HashMap<&'static str, NotificationHandler>>>>,
+    },
 }
