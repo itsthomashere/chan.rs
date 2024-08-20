@@ -1,5 +1,6 @@
 use std::{
     collections::HashMap,
+    fmt::Debug,
     future::{Future, IntoFuture},
     sync::{atomic::AtomicI32, Arc},
 };
@@ -222,11 +223,12 @@ impl Listener {
         let previous_handler = self.notification_handlers.lock().insert(
             method,
             Box::new(move |_, params| {
-                if let Ok(params) = serde_json::from_value::<Params>(params) {
+                if let Ok(params) = serde_json::from_value(params) {
                     f(params);
                 };
             }),
         );
+
         assert!(
             previous_handler.is_none(),
             "Registered multiple hanlers for the same methods"
