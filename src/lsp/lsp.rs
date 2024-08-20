@@ -47,13 +47,18 @@ impl LanguageSeverProcess {
         Self::request::<Initialize>(self, InitializeParams::default()).await
     }
 
-    pub fn on_notification<F, Params>(&self, method: &'static str, f: F) -> Subscription
+    pub fn on_notification<F, Params>(&self, method: &'static str, f: F) -> anyhow::Result<()>
     where
         F: 'static + FnMut(Params) + Send,
         Params: DeserializeOwned,
     {
         self.listener.on_notification(method, f)
     }
+
+    pub fn remove_notification_handler<T: notification::Notification>(&self) {
+        self.listener.remove_notification_handler::<T>();
+    }
+
     pub async fn request<T: request::Request>(
         &self,
         params: T::Params,

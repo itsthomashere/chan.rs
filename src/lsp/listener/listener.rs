@@ -1,4 +1,5 @@
 use std::{
+    any::Any,
     collections::HashMap,
     future::IntoFuture,
     sync::{atomic::AtomicI32, Arc},
@@ -214,7 +215,15 @@ impl Listener {
         Ok(())
     }
 
-    pub(crate) fn on_notification<F, Params>(&self, method: &'static str, mut f: F) -> Subscription
+    pub(crate) fn remove_notification_handler<T: notification::Notification>(&self) {
+        self.notification_handlers.lock().remove(T::METHOD);
+    }
+
+    pub(crate) fn on_notification<F, Params>(
+        &self,
+        method: &'static str,
+        mut f: F,
+    ) -> anyhow::Result<()>
     where
         F: 'static + FnMut(Params) + Send,
         Params: DeserializeOwned,
@@ -233,10 +242,7 @@ impl Listener {
             "Registered multiple hanlers for the same methods"
         );
 
-        Subscription::Notification {
-            method,
-            notification_handlers: Some(self.notification_handlers.clone()),
-        }
+        Ok(())
     }
 
     // pub(crate) fn on_request<F, Res, Params>(&self, method: &'static str, mut f: F) -> Subscription
