@@ -179,26 +179,36 @@ impl Listener {
         }
     }
 
+    // [TODO): Make this return the notification into output_tx
     pub(crate) async fn send_notification<T: notification::Notification>(
         &self,
         params: T::Params,
     ) -> anyhow::Result<()> {
+        let request_tx = self.request_tx.clone();
         let message = serde_json::to_string(&LspNotification {
             jsonrpc: JSONPRC_VER,
             method: T::METHOD,
             params,
         })
         .unwrap();
-        let tx = self.request_tx.clone();
 
-        let mut handle_notification = self.notification_handlers.lock();
-        handle_notification.insert(
-            T::METHOD,
-            Box::new(move |_, _| {
-                let _ = tx.send(message.clone());
-                let _ = tx.downgrade();
-            }),
-        );
+        let notify_task = tokio::spawn(async move {
+            request_tx
+                .send(message)
+                .context("Failed to write to lsp stdin")
+                .unwrap_or_default();
+        });
+
+        let time_out = tokio::spawn(async move {
+            tokio::time::sleep(LSP_REQUEST_TIMEOUT).await;
+        });
+        select! {
+            _ = notify_task => {}
+            _ = time_out => {
+                anyhow::bail!("Lsp request timed out");
+            }
+        }
+
         Ok(())
     }
 }
