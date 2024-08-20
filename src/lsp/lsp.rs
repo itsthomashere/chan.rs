@@ -3,6 +3,7 @@ pub mod ioloop;
 pub mod listener;
 pub mod types;
 
+use std::future::Future;
 use std::ops::DerefMut;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -14,8 +15,10 @@ use lsp_types::{
     notification, request, CodeActionKind, InitializeParams, InitializeResult, ServerCapabilities,
 };
 use parking_lot::RwLock;
+use serde::de::DeserializeOwned;
+use serde::Serialize;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver};
-use types::types::{AdapterServerCapabilities, LanguageServerBinary, ProccessId};
+use types::types::{AdapterServerCapabilities, LanguageServerBinary, ProccessId, Subscription};
 
 pub struct LanguageSeverProcess {
     capabilities: RwLock<ServerCapabilities>,
@@ -45,6 +48,23 @@ impl LanguageSeverProcess {
         Self::request::<Initialize>(self, InitializeParams::default()).await
     }
 
+    pub fn on_request<F, Res, Params, Fut>(&self, method: &'static str, f: F) -> Subscription
+    where
+        F: 'static + FnMut(Params) -> Fut + Send,
+        Fut: 'static + Send + Future<Output = anyhow::Result<Res>>,
+        Params: DeserializeOwned + Send + 'static,
+        Res: Serialize,
+    {
+        self.listener.on_request(method, f)
+    }
+
+    pub fn on_notification<F, Params>(&self, method: &'static str, f: F) -> Subscription
+    where
+        F: 'static + FnMut(Params) + Send,
+        Params: DeserializeOwned,
+    {
+        self.listener.on_notification(method, f)
+    }
     pub async fn request<T: request::Request>(
         &self,
         params: T::Params,
