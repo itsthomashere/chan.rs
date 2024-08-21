@@ -1,5 +1,4 @@
 use std::{
-    any::Any,
     collections::HashMap,
     future::IntoFuture,
     sync::{atomic::AtomicI32, Arc},
@@ -9,7 +8,7 @@ use anyhow::{anyhow, Context};
 use log::warn;
 use lsp_types::{notification, request};
 use parking_lot::Mutex;
-use serde::{de::DeserializeOwned, Serialize};
+use serde::de::DeserializeOwned;
 use tokio::{
     select,
     sync::{
@@ -20,9 +19,8 @@ use tokio::{
 };
 
 use crate::types::types::{
-    AnyNotification, AnyResponse, Error, InternalLspRequest, LspNotification, LspRequestId,
-    LspResponse, LspResult, NotificationHandler, ResponseHandler, Subscription, JSONPRC_VER,
-    LSP_REQUEST_TIMEOUT,
+    AnyNotification, AnyResponse, InternalLspRequest, LspNotification, LspRequestId,
+    NotificationHandler, ResponseHandler, JSONPRC_VER, LSP_REQUEST_TIMEOUT,
 };
 
 pub(crate) struct Listener {

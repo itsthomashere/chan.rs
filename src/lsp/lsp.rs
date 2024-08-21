@@ -14,9 +14,8 @@ use lsp_types::{
     notification, request, CodeActionKind, InitializeParams, InitializeResult, ServerCapabilities,
 };
 use parking_lot::RwLock;
-use serde::de::DeserializeOwned;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver};
-use types::types::{AdapterServerCapabilities, LanguageServerBinary, ProccessId, Subscription};
+use types::types::{AdapterServerCapabilities, LanguageServerBinary, ProccessId};
 
 pub struct LanguageSeverProcess {
     capabilities: RwLock<ServerCapabilities>,

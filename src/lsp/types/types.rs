@@ -70,9 +70,10 @@ pub(crate) enum LspResult<T> {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-pub(crate) struct Error {
-    pub(crate) message: String,
+pub struct Error {
+    pub message: String,
 }
+
 #[derive(Deserialize, Serialize)]
 pub struct LspNotification<'a, T> {
     pub jsonrpc: &'a str,
