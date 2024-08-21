@@ -1,3 +1,4 @@
+pub mod client;
 pub mod handlers;
 pub mod ioloop;
 pub mod listener;
@@ -42,8 +43,8 @@ impl LanguageSeverProcess {
         }
     }
 
-    pub async fn initialize(&self) -> anyhow::Result<InitializeResult> {
-        Self::request::<Initialize>(self, InitializeParams::default()).await
+    pub async fn initialize(&self, params: InitializeParams) -> anyhow::Result<InitializeResult> {
+        Self::request::<Initialize>(self, params).await
     }
 
     pub fn on_notification<T: notification::Notification, F>(&self, f: F) -> anyhow::Result<()>
