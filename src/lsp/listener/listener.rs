@@ -206,7 +206,7 @@ impl Listener {
         select! {
             _ = notify_task => {}
             _ = time_out => {
-                anyhow::bail!("Lsp request timed out");
+                anyhow::bail!("Lsp notification timed out");
             }
         }
 
@@ -217,17 +217,15 @@ impl Listener {
         self.notification_handlers.lock().remove(T::METHOD);
     }
 
-    pub(crate) fn on_notification<F, Params>(
+    pub(crate) fn on_notification<T: notification::Notification, F>(
         &self,
-        method: &'static str,
         mut f: F,
     ) -> anyhow::Result<()>
     where
-        F: 'static + FnMut(Params) + Send,
-        Params: DeserializeOwned,
+        F: 'static + FnMut(T::Params) + Send,
     {
         let previous_handler = self.notification_handlers.lock().insert(
-            method,
+            T::METHOD,
             Box::new(move |_, params| {
                 if let Ok(params) = serde_json::from_value(params) {
                     f(params);
@@ -242,14 +240,6 @@ impl Listener {
 
         Ok(())
     }
-
-    // pub(crate) fn on_request<F, Res, Params>(&self, method: &'static str, mut f: F) -> Subscription
-    // where
-    //     F: 'static + FnMut(Params) -> anyhow::Result<Res> + Send,
-    //     Params: DeserializeOwned + Send + 'static,
-    //     Res: 'static + Serialize + Send,
-    // {
-    // }
 }
 
 impl Drop for Listener {
