@@ -7,10 +7,11 @@ use serde_json::{value::RawValue, Value};
 
 pub const CONTENT_LEN_HEADER: &str = "Content-Length: ";
 pub const LSP_REQUEST_TIMEOUT: Duration = Duration::from_secs(5);
-pub const JSONPRC_VER: &str = "2.0";
+pub const JSON_RPC_VER: &str = "2.0";
 pub const HEADER_DELIMITER: &[u8; 4] = b"\r\n\r\n";
-pub type NotificationHandler = Box<dyn Send + FnMut(Option<LspRequestId>, Value)>;
-pub type ResponseHandler = Box<dyn Send + FnOnce(Result<String, Error>)>;
+
+pub type NotificationHandler = Box<dyn Send + FnMut(Option<RequestId>, Value)>;
+pub type ResponseHandler = Box<dyn Send + FnOnce(Result<String, LspError>)>;
 pub type IoHandler = Box<dyn Send + FnMut(IoKind, &str)>;
 
 #[derive(Debug, Clone, Copy)]
@@ -19,6 +20,7 @@ pub enum IoKind {
     StdIn,
     StdErr,
 }
+
 pub struct LanguageServerBinary {
     pub path: PathBuf,
     pub envs: Option<HashMap<String, String>>,
@@ -31,15 +33,15 @@ pub struct ProccessId(pub usize);
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Serialize, Deserialize)]
 #[serde(untagged)]
-pub enum LspRequestId {
+pub enum RequestId {
     Str(String),
     Int(i32),
 }
 
 #[derive(Deserialize, Serialize)]
-pub struct InternalLspRequest<'a, T> {
+pub struct Request<'a, T> {
     pub jsonrpc: &'a str,
-    pub id: LspRequestId,
+    pub id: RequestId,
     pub method: &'a str,
     pub params: T,
 }
@@ -47,16 +49,16 @@ pub struct InternalLspRequest<'a, T> {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct AnyResponse<'a> {
     pub jsonrpc: &'a str,
-    pub id: LspRequestId,
+    pub id: RequestId,
     #[serde(default)]
-    pub error: Option<Error>,
+    pub error: Option<LspError>,
     #[serde(borrow)]
     pub result: Option<&'a RawValue>,
 }
 #[derive(Debug, Serialize, Deserialize)]
-pub struct LspResponse<'a, T> {
+pub struct Response<'a, T> {
     pub(crate) jsonrpc: &'a str,
-    pub(crate) id: LspRequestId,
+    pub(crate) id: RequestId,
     #[serde(flatten)]
     pub(crate) value: LspResult<T>,
 }
@@ -66,16 +68,16 @@ pub struct LspResponse<'a, T> {
 pub(crate) enum LspResult<T> {
     #[serde(rename = "result")]
     Ok(Option<T>),
-    Error(Option<Error>),
+    Error(Option<LspError>),
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-pub struct Error {
+pub struct LspError {
     pub message: String,
 }
 
 #[derive(Deserialize, Serialize)]
-pub struct LspNotification<'a, T> {
+pub struct Notification<'a, T> {
     pub jsonrpc: &'a str,
     #[serde(borrow)]
     pub method: &'a str,
@@ -85,7 +87,7 @@ pub struct LspNotification<'a, T> {
 #[derive(Debug, Serialize, Clone, Deserialize)]
 pub struct AnyNotification {
     #[serde(default)]
-    pub id: Option<LspRequestId>,
+    pub id: Option<RequestId>,
     pub method: String,
     #[serde(default)]
     pub params: Option<Value>,
