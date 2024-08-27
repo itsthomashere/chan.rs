@@ -1,28 +1,28 @@
 use anyhow::anyhow;
 use log::warn;
-use lsp_types::request::Request;
 use parking_lot::Mutex;
-use std::{any::Any, collections::HashMap, sync::Arc};
+use std::io::Write;
+use std::{collections::HashMap, sync::Arc};
+use tokio::io::{AsyncBufReadExt, AsyncWriteExt};
+use tokio::task::JoinHandle;
 use tokio::{
-    io::{AsyncReadExt, BufReader},
+    io::{AsyncReadExt, BufReader, BufWriter},
     process::{ChildStderr, ChildStdin, ChildStdout},
-    sync::mpsc::UnboundedSender,
-    task::JoinHandle,
+    sync::mpsc::{UnboundedReceiver, UnboundedSender},
 };
 
 use crate::{
-    handlers::{self, input_handlers::read_headers},
+    handlers::input_handlers::read_headers,
     types::types::{
-        AnyNotification, AnyResponse, IoHandler, IoKind, NotificationHandler, RequestId,
-        ResponseHandler, CONTENT_LEN_HEADER,
+        AnyNotification, AnyResponse, IoHandler, IoKind, RequestId, ResponseHandler,
+        CONTENT_LEN_HEADER,
     },
 };
 
 pub(crate) struct IoLoop {
-    loop_handle: JoinHandle<anyhow::Result<()>>,
-    io_handlers: Arc<Mutex<HashMap<i32, IoHandler>>>,
-    response_handlers: Arc<Mutex<Option<HashMap<RequestId, ResponseHandler>>>>,
-    notification_handlers: Arc<Mutex<HashMap<&'static str, NotificationHandler>>>,
+    stdin_task: JoinHandle<anyhow::Result<()>>,
+    stdout_task: JoinHandle<anyhow::Result<()>>,
+    stderr_task: JoinHandle<anyhow::Result<()>>,
     notification_channel_tx: UnboundedSender<AnyNotification>,
 }
 
@@ -33,29 +33,73 @@ impl IoLoop {
         stderr: ChildStderr,
         io_handlers: Arc<Mutex<HashMap<i32, IoHandler>>>,
         response_handlers: Arc<Mutex<Option<HashMap<RequestId, ResponseHandler>>>>,
-        notification_handlers: Arc<Mutex<HashMap<&'static str, NotificationHandler>>>,
         notification_channel_tx: UnboundedSender<AnyNotification>,
-        request_in_rx: UnboundedSender<String>,
+        request_in_rx: UnboundedReceiver<String>,
+        response_out_tx: UnboundedSender<String>,
+        stderr_capture: Arc<Mutex<Option<String>>>,
     ) -> Self {
-        let loop_handle = tokio::spawn(Self::handle_stdout(
+        let stdout_task = tokio::spawn(Self::handle_stdout(
             stdout,
             io_handlers.clone(),
             response_handlers.clone(),
             notification_channel_tx.clone(),
         ));
 
+        let stdin_task = tokio::spawn(Self::handle_stdin(
+            stdin,
+            request_in_rx,
+            response_out_tx,
+            response_handlers.clone(),
+            io_handlers.clone(),
+        ));
+
+        let stderr_task = tokio::spawn(Self::handle_stderr(stderr, io_handlers, stderr_capture));
+
         Self {
-            loop_handle,
-            io_handlers: io_handlers.clone(),
-            response_handlers: response_handlers.clone(),
-            notification_handlers: notification_handlers.clone(),
+            stdin_task,
+            stdout_task,
+            stderr_task,
             notification_channel_tx: notification_channel_tx.clone(),
         }
     }
 
-    async fn handle_stdin() -> anyhow::Result<()> {
+    async fn handle_stdin(
+        stdin: ChildStdin,
+        mut request_in_rx: UnboundedReceiver<String>,
+        response_out_tx: UnboundedSender<String>,
+        response_handlers: Arc<Mutex<Option<HashMap<RequestId, ResponseHandler>>>>,
+        io_handlers: Arc<Mutex<HashMap<i32, IoHandler>>>,
+    ) -> anyhow::Result<()> {
+        let mut buff_writer = BufWriter::new(stdin);
+        let _clear_response_handlers = {
+            let response_handlers = response_handlers.clone();
+            move || {
+                response_handlers.lock().take();
+            }
+        };
+
+        let mut content_len_buffer = Vec::new();
+
+        while let Some(message) = request_in_rx.recv().await {
+            log::trace!("Incoming Lsp Request:{message}");
+
+            for handler in io_handlers.lock().values_mut() {
+                handler(IoKind::StdIn, &message);
+            }
+
+            content_len_buffer.clear();
+            write!(content_len_buffer, "{}", message.len()).unwrap();
+            buff_writer.write_all(CONTENT_LEN_HEADER.as_bytes()).await?;
+            buff_writer.write_all(&content_len_buffer).await?;
+            buff_writer.write_all("\r\n\r\n".as_bytes()).await?;
+            buff_writer.write_all(message.as_bytes()).await?;
+            buff_writer.flush().await?;
+        }
+        drop(response_out_tx);
+
         Ok(())
     }
+
     async fn handle_stdout(
         stdout: ChildStdout,
         io_handlers: Arc<Mutex<HashMap<i32, IoHandler>>>,
@@ -120,11 +164,29 @@ impl IoLoop {
     async fn handle_stderr(
         stderr: ChildStderr,
         io_handlers: Arc<Mutex<HashMap<i32, IoHandler>>>,
-        request_handlers: Arc<Mutex<Option<HashMap<RequestId, ResponseHandler>>>>,
-        notification_handlers: Arc<Mutex<HashMap<&'static str, NotificationHandler>>>,
-        notification_channel_tx: UnboundedSender<AnyNotification>,
-        request_in_rx: UnboundedSender<String>,
+        stderr_capture: Arc<Mutex<Option<String>>>,
     ) -> anyhow::Result<()> {
-        Ok(())
+        let mut buff_reader = BufReader::new(stderr);
+        let mut buffer: Vec<u8> = Vec::new();
+        loop {
+            buffer.clear();
+
+            let byte_read = buff_reader.read_until(b'\n', &mut buffer).await?;
+            if byte_read == 0 {
+                return Ok(());
+            }
+
+            if let Ok(message) = std::str::from_utf8(&buffer) {
+                log::trace!("Incoming Lsp Stderr message: {message}");
+                for handler in io_handlers.lock().values_mut() {
+                    handler(IoKind::StdErr, message);
+                }
+
+                if let Some(stderr) = stderr_capture.lock().as_mut() {
+                    stderr.push_str(message);
+                }
+            };
+            tokio::task::yield_now().await;
+        }
     }
 }
