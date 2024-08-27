@@ -2,11 +2,11 @@ use anyhow::{anyhow, Context};
 use log::warn;
 use parking_lot::Mutex;
 use std::io::Write;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::{collections::HashMap, sync::Arc};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt};
-use tokio::process;
+use tokio::process::{self, Child};
 use tokio::task::JoinHandle;
 use tokio::{
     io::{AsyncReadExt, BufReader, BufWriter},
@@ -14,7 +14,7 @@ use tokio::{
     sync::mpsc::{UnboundedReceiver, UnboundedSender},
 };
 
-use crate::types::types::LanguageServerBinary;
+use crate::types::types::{LanguageServerBinary, ProccessId};
 use crate::{
     handlers::input_handlers::read_headers,
     types::types::{
@@ -28,10 +28,16 @@ pub(crate) struct IoLoop {
     pub(crate) stdout_task: JoinHandle<anyhow::Result<()>>,
     pub(crate) stderr_task: JoinHandle<anyhow::Result<()>>,
     pub(crate) notification_channel_tx: UnboundedSender<AnyNotification>,
+    pub(crate) working_dir: PathBuf,
+    pub(crate) root_path: PathBuf,
+    pub(crate) name: Arc<str>,
+    pub(crate) server_id: ProccessId,
+    pub(crate) server: Arc<Mutex<Option<Child>>>,
 }
 
 impl IoLoop {
     pub(crate) fn new(
+        server_id: ProccessId,
         binary: LanguageServerBinary,
         root_path: &Path,
         io_handlers: Arc<Mutex<HashMap<i32, IoHandler>>>,
@@ -91,8 +97,16 @@ impl IoLoop {
         ));
 
         let stderr_task = tokio::spawn(Self::handle_stderr(stderr, io_handlers, stderr_capture));
-
+        let name: Arc<str> = match binary.path.file_name() {
+            Some(name) => name.to_string_lossy().into(),
+            None => Arc::default(),
+        };
         Ok(Self {
+            server: Arc::new(Mutex::new(Some(server))),
+            server_id,
+            name,
+            root_path: root_path.to_path_buf(),
+            working_dir: working_dir.to_path_buf(),
             stdin_task,
             stdout_task,
             stderr_task,
@@ -228,5 +242,21 @@ impl IoLoop {
             };
             tokio::task::yield_now().await;
         }
+    }
+
+    pub(crate) fn working_dir(&self) -> &PathBuf {
+        &self.working_dir
+    }
+
+    pub(crate) fn root_path(&self) -> &PathBuf {
+        &self.root_path
+    }
+
+    pub(crate) fn name(&self) -> &str {
+        &self.name
+    }
+
+    pub(crate) fn server_id(&self) -> ProccessId {
+        self.server_id
     }
 }
