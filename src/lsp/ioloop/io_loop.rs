@@ -1,9 +1,12 @@
-use anyhow::anyhow;
+use anyhow::{anyhow, Context};
 use log::warn;
 use parking_lot::Mutex;
 use std::io::Write;
+use std::path::Path;
+use std::process::Stdio;
 use std::{collections::HashMap, sync::Arc};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt};
+use tokio::process;
 use tokio::task::JoinHandle;
 use tokio::{
     io::{AsyncReadExt, BufReader, BufWriter},
@@ -11,6 +14,7 @@ use tokio::{
     sync::mpsc::{UnboundedReceiver, UnboundedSender},
 };
 
+use crate::types::types::LanguageServerBinary;
 use crate::{
     handlers::input_handlers::read_headers,
     types::types::{
@@ -20,24 +24,57 @@ use crate::{
 };
 
 pub(crate) struct IoLoop {
-    stdin_task: JoinHandle<anyhow::Result<()>>,
-    stdout_task: JoinHandle<anyhow::Result<()>>,
-    stderr_task: JoinHandle<anyhow::Result<()>>,
-    notification_channel_tx: UnboundedSender<AnyNotification>,
+    pub(crate) stdin_task: JoinHandle<anyhow::Result<()>>,
+    pub(crate) stdout_task: JoinHandle<anyhow::Result<()>>,
+    pub(crate) stderr_task: JoinHandle<anyhow::Result<()>>,
+    pub(crate) notification_channel_tx: UnboundedSender<AnyNotification>,
 }
 
 impl IoLoop {
-    fn new(
-        stdin: ChildStdin,
-        stdout: ChildStdout,
-        stderr: ChildStderr,
+    pub(crate) fn new(
+        binary: LanguageServerBinary,
+        root_path: &Path,
         io_handlers: Arc<Mutex<HashMap<i32, IoHandler>>>,
         response_handlers: Arc<Mutex<Option<HashMap<RequestId, ResponseHandler>>>>,
         notification_channel_tx: UnboundedSender<AnyNotification>,
         request_in_rx: UnboundedReceiver<String>,
-        response_out_tx: UnboundedSender<String>,
+        output_done_tx: UnboundedSender<String>,
         stderr_capture: Arc<Mutex<Option<String>>>,
-    ) -> Self {
+    ) -> anyhow::Result<Self> {
+        let working_dir = if root_path.is_dir() {
+            root_path
+        } else {
+            root_path.parent().unwrap_or_else(|| Path::new("/"))
+        };
+
+        log::info!(
+            "Starting LSP. Bin Path: {:?}, working directory: {:?}, arguments: {:?}",
+            binary.path,
+            working_dir,
+            &binary.args
+        );
+
+        let mut command = process::Command::new(&binary.path);
+        command
+            .current_dir(working_dir)
+            .args(&binary.args)
+            .envs(binary.envs.unwrap_or_default())
+            .stdout(Stdio::piped())
+            .stdin(Stdio::piped())
+            .stderr(Stdio::piped())
+            .kill_on_drop(true);
+
+        let mut server = command.spawn().with_context(|| {
+            format!(
+                "Failed to spawn lsp. Path: {:?}. Working directory: {:?}. Arguments: {:?}",
+                binary.path, working_dir, &binary.args
+            )
+        })?;
+
+        let stdin = server.stdin.take().unwrap();
+        let stdout = server.stdout.take().unwrap();
+        let stderr = server.stderr.take().unwrap();
+
         let stdout_task = tokio::spawn(Self::handle_stdout(
             stdout,
             io_handlers.clone(),
@@ -48,25 +85,25 @@ impl IoLoop {
         let stdin_task = tokio::spawn(Self::handle_stdin(
             stdin,
             request_in_rx,
-            response_out_tx,
+            output_done_tx,
             response_handlers.clone(),
             io_handlers.clone(),
         ));
 
         let stderr_task = tokio::spawn(Self::handle_stderr(stderr, io_handlers, stderr_capture));
 
-        Self {
+        Ok(Self {
             stdin_task,
             stdout_task,
             stderr_task,
             notification_channel_tx: notification_channel_tx.clone(),
-        }
+        })
     }
 
     async fn handle_stdin(
         stdin: ChildStdin,
         mut request_in_rx: UnboundedReceiver<String>,
-        response_out_tx: UnboundedSender<String>,
+        output_done_tx: UnboundedSender<String>,
         response_handlers: Arc<Mutex<Option<HashMap<RequestId, ResponseHandler>>>>,
         io_handlers: Arc<Mutex<HashMap<i32, IoHandler>>>,
     ) -> anyhow::Result<()> {
@@ -81,6 +118,7 @@ impl IoLoop {
         let mut content_len_buffer = Vec::new();
 
         while let Some(message) = request_in_rx.recv().await {
+            println!("StdIn got request: {message}");
             log::trace!("Incoming Lsp Request:{message}");
 
             for handler in io_handlers.lock().values_mut() {
@@ -95,7 +133,7 @@ impl IoLoop {
             buff_writer.write_all(message.as_bytes()).await?;
             buff_writer.flush().await?;
         }
-        drop(response_out_tx);
+        drop(output_done_tx);
 
         Ok(())
     }
@@ -126,6 +164,7 @@ impl IoLoop {
             buff_reader.read_exact(&mut buffer).await?;
 
             if let Ok(message) = std::str::from_utf8(&buffer) {
+                println!("StdOut Got response: {message}");
                 log::trace!("incoming message: {message}");
                 for handler in io_handlers.lock().values_mut() {
                     handler(IoKind::StdOut, message);
@@ -177,6 +216,7 @@ impl IoLoop {
             }
 
             if let Ok(message) = std::str::from_utf8(&buffer) {
+                println!("StdErr: Got: {message}");
                 log::trace!("Incoming Lsp Stderr message: {message}");
                 for handler in io_handlers.lock().values_mut() {
                     handler(IoKind::StdErr, message);
