@@ -7,10 +7,9 @@ use anyhow::Result;
 use liblspc::types::types::ProccessId;
 use liblspc::{types::types::LanguageServerBinary, LanguageSeverProcess};
 use lsp_types::{
-    notification::{self, Initialized, Notification},
-    request, InitializedParams, Registration, RegistrationParams, ShowMessageRequestParams,
+    notification::{Initialized, ShowMessage},
+    request, InitializeParams, InitializedParams, Registration, RegistrationParams,
 };
-use tokio::{io::join, join, task::yield_now};
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -22,13 +21,21 @@ async fn main() -> Result<()> {
     let root = Path::new("/");
 
     let procc = LanguageSeverProcess::new(binary, root, ProccessId(0));
-    let init_res = procc.initialize().await;
-    println!("{:?}", init_res);
+    procc.initialize(InitializeParams::default()).await?;
+    println!("working dir: {:?}", procc.working_dir());
+    println!("root path : {:?}", procc.root_path());
     let regis = RegistrationParams {
-        registrations: [].to_vec(),
+        registrations: vec![Registration {
+            id: "testing_hehe".to_string(),
+            method: "text/willSaveWaitUntil".to_string(),
+            register_options: None,
+        }],
     };
     let inited_params = InitializedParams {};
-    let inited = procc.notify::<Initialized>(inited_params).await;
+    procc.on_notification::<ShowMessage, _>(move |params| {
+        println!("Got notification: {:?}\n", params);
+    })?;
+    procc.notify::<Initialized>(inited_params).await?;
     let registerd = procc.request::<request::RegisterCapability>(regis).await;
     println!("{:?}", registerd);
     Ok(())
