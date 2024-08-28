@@ -1,5 +1,5 @@
 use anyhow::{anyhow, Context};
-use lsp_types::request;
+use lsp_types::{notification, request};
 use parking_lot::Mutex;
 use serde_json::Value;
 use std::future::IntoFuture;
@@ -11,7 +11,7 @@ use tokio::sync::oneshot;
 
 use tokio::{sync::mpsc::UnboundedReceiver, task::JoinHandle};
 
-use crate::types::types::{Request, JSON_RPC_VER, LSP_REQUEST_TIMEOUT};
+use crate::types::types::{Notification, Request, JSON_RPC_VER, LSP_REQUEST_TIMEOUT};
 use crate::{
     ioloop::io_loop::IoLoop,
     types::types::{AnyNotification, IoHandler, NotificationHandler, RequestId, ResponseHandler},
@@ -89,6 +89,7 @@ impl Listener {
 
         let handle_response = self
             .response_handlers
+            .clone()
             .lock()
             .as_mut()
             .ok_or_else(|| anyhow!("Server shutdown"))
@@ -143,5 +144,21 @@ impl Listener {
                     anyhow::bail!("Lsp Request time out");
                 }
         }
+    }
+
+    pub(crate) async fn send_notification<T: notification::Notification>(
+        &self,
+        params: T::Params,
+    ) -> anyhow::Result<()> {
+        let message = serde_json::to_string(&Notification {
+            jsonrpc: JSON_RPC_VER,
+            method: T::METHOD,
+            params,
+        })
+        .unwrap();
+
+        &self.request_out_rx.send(message)?;
+
+        Ok(())
     }
 }
