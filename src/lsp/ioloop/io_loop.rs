@@ -165,7 +165,7 @@ impl IoLoop {
 
         loop {
             buffer.clear();
-            read_headers(&mut buff_reader, &mut buffer);
+            read_headers(&mut buff_reader, &mut buffer).await?;
 
             let header = std::str::from_utf8(&buffer)?;
             let message_len = header
