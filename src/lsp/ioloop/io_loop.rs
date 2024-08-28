@@ -15,6 +15,7 @@ use tokio::{
 };
 
 use crate::types::types::{LanguageServerBinary, ProccessId};
+use crate::util::util;
 use crate::{
     handlers::input_handlers::read_headers,
     types::types::{
@@ -36,6 +37,7 @@ pub(crate) struct IoLoop {
 }
 
 impl IoLoop {
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
         server_id: ProccessId,
         binary: LanguageServerBinary,
@@ -122,12 +124,12 @@ impl IoLoop {
         io_handlers: Arc<Mutex<HashMap<i32, IoHandler>>>,
     ) -> anyhow::Result<()> {
         let mut buff_writer = BufWriter::new(stdin);
-        let _clear_response_handlers = {
+        let _clear_response_handlers = util::defer({
             let response_handlers = response_handlers.clone();
             move || {
                 response_handlers.lock().take();
             }
-        };
+        });
 
         let mut content_len_buffer = Vec::new();
 
