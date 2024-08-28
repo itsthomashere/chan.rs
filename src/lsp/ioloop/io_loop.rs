@@ -83,22 +83,24 @@ impl IoLoop {
         let stdout = server.stdout.take().unwrap();
         let stderr = server.stderr.take().unwrap();
 
-        let stdout_task = tokio::spawn(Self::handle_stdout(
-            stdout,
-            io_handlers.clone(),
-            response_handlers.clone(),
-            notification_channel_tx.clone(),
-        ));
+        // Clone the arcs to send to move other threads
+        let ih_1 = io_handlers.clone();
+        let ih_2 = io_handlers.clone();
+        let res_handler = response_handlers.clone();
+        let noti_channel = notification_channel_tx.clone();
 
-        let stdin_task = tokio::spawn(Self::handle_stdin(
-            stdin,
-            request_in_rx,
-            output_done_tx,
-            response_handlers.clone(),
-            io_handlers.clone(),
-        ));
+        let stdout_task = tokio::spawn(async move {
+            Self::handle_stdout(stdout, ih_1, response_handlers.clone(), noti_channel).await
+        });
 
-        let stderr_task = tokio::spawn(Self::handle_stderr(stderr, io_handlers, stderr_capture));
+        let stdin_task = tokio::spawn(async move {
+            Self::handle_stdin(stdin, request_in_rx, output_done_tx, res_handler, ih_2).await
+        });
+
+        let stderr_task =
+            tokio::spawn(
+                async move { Self::handle_stderr(stderr, io_handlers, stderr_capture).await },
+            );
         let name: Arc<str> = match binary.path.file_name() {
             Some(name) => name.to_string_lossy().into(),
             None => Arc::default(),

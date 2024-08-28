@@ -13,7 +13,6 @@ use tokio::{sync::mpsc::UnboundedReceiver, task::JoinHandle};
 
 use crate::types::types::{Notification, Request, JSON_RPC_VER, LSP_REQUEST_TIMEOUT};
 use crate::{
-    ioloop::io_loop::IoLoop,
     types::types::{AnyNotification, IoHandler, NotificationHandler, RequestId, ResponseHandler},
     util::util,
 };
@@ -22,7 +21,6 @@ pub(crate) struct Listener {
     request_out_rx: UnboundedSender<String>,
     io_handlers: Arc<Mutex<HashMap<i32, IoHandler>>>,
     response_handlers: Arc<Mutex<Option<HashMap<RequestId, ResponseHandler>>>>,
-    notification_channel_rx: UnboundedReceiver<AnyNotification>,
     output_tasks: JoinHandle<anyhow::Result<()>>,
 }
 
@@ -32,11 +30,27 @@ impl Listener {
         response_handlers: Arc<Mutex<Option<HashMap<RequestId, ResponseHandler>>>>,
         notification_handlers: Arc<Mutex<HashMap<&'static str, NotificationHandler>>>,
         notification_channel_rx: UnboundedReceiver<AnyNotification>,
+        stdin_task: JoinHandle<anyhow::Result<()>>,
+        request_out_rx: UnboundedSender<String>,
     ) -> anyhow::Result<Self> {
+        let res_handler = response_handlers.clone();
+        let noti_handler = notification_handlers.clone();
+        let output_tasks = tokio::spawn(async move {
+            Self::handle_output(
+                noti_handler,
+                res_handler,
+                stdin_task,
+                notification_channel_rx,
+            )
+            .await
+        });
+
         Ok(Self {
-            io_handlers: todo!(),
-            response_handlers: todo!(),
-            notification_channel_rx: todo!(),
+            output_tasks,
+            next_id: Default::default(),
+            request_out_rx,
+            io_handlers,
+            response_handlers,
         })
     }
 
@@ -157,7 +171,7 @@ impl Listener {
         })
         .unwrap();
 
-        &self.request_out_rx.send(message)?;
+        self.request_out_rx.send(message)?;
 
         Ok(())
     }
