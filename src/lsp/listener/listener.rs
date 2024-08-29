@@ -18,8 +18,9 @@ use crate::{
 };
 pub(crate) struct Listener {
     next_id: AtomicI32,
-    request_out_rx: UnboundedSender<String>,
+    request_out_tx: UnboundedSender<String>,
     io_handlers: Arc<Mutex<HashMap<i32, IoHandler>>>,
+    notification_handlers: Arc<Mutex<HashMap<&'static str, NotificationHandler>>>,
     response_handlers: Arc<Mutex<Option<HashMap<RequestId, ResponseHandler>>>>,
     output_tasks: JoinHandle<anyhow::Result<()>>,
 }
@@ -30,34 +31,27 @@ impl Listener {
         response_handlers: Arc<Mutex<Option<HashMap<RequestId, ResponseHandler>>>>,
         notification_handlers: Arc<Mutex<HashMap<&'static str, NotificationHandler>>>,
         notification_channel_rx: UnboundedReceiver<AnyNotification>,
-        stdin_task: JoinHandle<anyhow::Result<()>>,
-        request_out_rx: UnboundedSender<String>,
+        request_out_tx: UnboundedSender<String>,
     ) -> anyhow::Result<Self> {
         let res_handler = response_handlers.clone();
         let noti_handler = notification_handlers.clone();
         let output_tasks = tokio::spawn(async move {
-            Self::handle_output(
-                noti_handler,
-                res_handler,
-                stdin_task,
-                notification_channel_rx,
-            )
-            .await
+            Self::handle_output(noti_handler, res_handler, notification_channel_rx).await
         });
 
         Ok(Self {
             output_tasks,
             next_id: Default::default(),
-            request_out_rx,
+            request_out_tx,
             io_handlers,
             response_handlers,
+            notification_handlers,
         })
     }
 
     async fn handle_output(
         notification_handlers: Arc<Mutex<HashMap<&'static str, NotificationHandler>>>,
         response_handlers: Arc<Mutex<Option<HashMap<RequestId, ResponseHandler>>>>,
-        stdin_task: JoinHandle<anyhow::Result<()>>,
         mut notification_channel_rx: UnboundedReceiver<AnyNotification>,
     ) -> anyhow::Result<()> {
         let _clear_response_handlers = util::defer({
@@ -80,7 +74,7 @@ impl Listener {
             tokio::task::yield_now().await;
         }
 
-        stdin_task.await?
+        Ok(())
     }
 
     pub(crate) async fn request<T: request::Request>(
@@ -128,7 +122,7 @@ impl Listener {
                 )
             });
 
-        let request_out_rx = &self.request_out_rx.clone();
+        let request_out_rx = &self.request_out_tx.clone();
         let send = request_out_rx
             .send(message)
             .context("Failed to write to LSP stdin");
@@ -171,8 +165,16 @@ impl Listener {
         })
         .unwrap();
 
-        self.request_out_rx.send(message)?;
+        self.request_out_tx.send(message)?;
 
+        Ok(())
+    }
+
+    pub(crate) fn kill(&self) -> anyhow::Result<()> {
+        self.output_tasks.abort();
+        drop(self.notification_handlers.lock());
+        drop(self.response_handlers.lock());
+        drop(self.io_handlers.lock());
         Ok(())
     }
 }

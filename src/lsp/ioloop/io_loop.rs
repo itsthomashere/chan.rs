@@ -25,15 +25,15 @@ use crate::{
 };
 
 pub(crate) struct IoLoop {
-    pub(crate) stdin_task: JoinHandle<anyhow::Result<()>>,
-    pub(crate) stdout_task: JoinHandle<anyhow::Result<()>>,
-    pub(crate) stderr_task: JoinHandle<anyhow::Result<()>>,
-    pub(crate) notification_channel_tx: UnboundedSender<AnyNotification>,
-    pub(crate) working_dir: PathBuf,
-    pub(crate) root_path: PathBuf,
-    pub(crate) name: Arc<str>,
-    pub(crate) server_id: ProccessId,
-    pub(crate) server: Arc<Mutex<Option<Child>>>,
+    stdin_task: JoinHandle<anyhow::Result<()>>,
+    stdout_task: JoinHandle<anyhow::Result<()>>,
+    stderr_task: JoinHandle<anyhow::Result<()>>,
+    notification_channel_tx: UnboundedSender<AnyNotification>,
+    working_dir: PathBuf,
+    root_path: PathBuf,
+    name: Arc<str>,
+    server_id: ProccessId,
+    server: Arc<Mutex<Option<Child>>>,
 }
 
 impl IoLoop {
@@ -262,5 +262,15 @@ impl IoLoop {
 
     pub(crate) fn server_id(&self) -> ProccessId {
         self.server_id
+    }
+
+    pub(crate) fn kill(&self) -> anyhow::Result<()> {
+        self.stdin_task.abort();
+        self.stdout_task.abort();
+        self.stderr_task.abort();
+        self.server.lock().take().unwrap().start_kill()?;
+        let _ = self.notification_channel_tx.downgrade();
+
+        Ok(())
     }
 }
