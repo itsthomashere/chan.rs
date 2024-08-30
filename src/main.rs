@@ -30,9 +30,10 @@ async fn main() -> Result<()> {
         LanguageServerProcess::new(binary, ProccessId(0), root, stderr_capture.clone(), None)?;
     let init_params = InitializeParams::default();
 
-    let response = procc.request::<Initialize>(init_params).await;
+    let response = procc.request::<Initialize>(init_params).await.unwrap();
+    let response = serde_json::to_string_pretty(&response).unwrap();
 
-    println!("{:?}\n", response);
+    println!("{}\n", response);
 
     let inited = InitializedParams {};
     let _ = procc.notify::<Initialized>(inited).await;
@@ -44,8 +45,8 @@ async fn main() -> Result<()> {
         }],
     };
     let registerd = procc.request::<RegisterCapability>(regis).await;
-    println!("{:?}", registerd);
-    println!("{:?}", stderr_capture.lock().as_slice());
+    println!("{:?}\n", registerd);
+    println!("{:?}\n", stderr_capture.lock().as_slice());
 
     Ok(())
 }
