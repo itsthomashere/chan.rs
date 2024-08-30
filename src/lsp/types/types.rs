@@ -115,3 +115,15 @@ pub enum Subscription {
         io_handlers: Option<Weak<Mutex<HashMap<i32, IoHandler>>>>,
     },
 }
+
+impl Subscription {
+    pub fn detach(&mut self) {
+        match self {
+            Subscription::Notification {
+                notification_handlers,
+                ..
+            } => *notification_handlers = None,
+            Subscription::Io { io_handlers, .. } => *io_handlers = None,
+        }
+    }
+}
