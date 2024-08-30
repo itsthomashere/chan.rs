@@ -1,5 +1,6 @@
 use std::{
     collections::HashMap,
+    future::Future,
     ops::DerefMut,
     path::{Path, PathBuf},
     sync::Arc,
@@ -11,8 +12,8 @@ use lsp_types::{notification, request, CodeActionKind, ServerCapabilities};
 use parking_lot::{Mutex, RwLock};
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver};
 use types::types::{
-    AdapterServerCapabilities, AnyNotification, IoHandler, LanguageServerBinary,
-    NotificationHandler, ProccessId, ResponseHandler,
+    AdapterServerCapabilities, AnyNotification, IoHandler, IoKind, LanguageServerBinary,
+    NotificationHandler, ProccessId, ResponseHandler, Subscription,
 };
 
 pub mod handlers;
@@ -89,6 +90,44 @@ impl LanguageServerProcess {
         params: T::Params,
     ) -> anyhow::Result<()> {
         self.listener.send_notification::<T>(params).await
+    }
+
+    pub fn on_notification<T: notification::Notification, F>(&self, f: F) -> Subscription
+    where
+        F: 'static + Send + FnMut(T::Params),
+    {
+        self.listener.on_notification::<T, F>(f)
+    }
+
+    pub fn on_request<T: request::Request, Fut, F>(&self, f: F) -> Subscription
+    where
+        Fut: 'static + Future<Output = anyhow::Result<T::Result>> + Send,
+        F: 'static + Send + FnMut(T::Params) -> Fut + Send,
+    {
+        self.listener.on_request::<T, Fut, F>(f)
+    }
+
+    pub fn on_io<F>(&self, f: F) -> Subscription
+    where
+        F: 'static + Send + FnMut(IoKind, &str),
+    {
+        self.listener.on_io(f)
+    }
+
+    pub fn remove_notification_handler<T: notification::Notification>(&self) {
+        self.listener.remove_notification_handler::<T>();
+    }
+
+    pub fn remove_request_handler<T: request::Request>(&self) {
+        self.listener.remove_request_handler::<T>();
+    }
+
+    pub fn has_notification_handler<T: notification::Notification>(&self) -> bool {
+        self.listener.has_notification_handler::<T>()
+    }
+
+    pub fn has_request_handler<T: request::Request>(&self) -> bool {
+        self.listener.has_request_handler::<T>()
     }
 
     pub fn server_id(&self) -> ProccessId {

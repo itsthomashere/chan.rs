@@ -245,7 +245,7 @@ impl Listener {
         }
     }
 
-    pub(crate) fn on_io<F>(&self, mut f: F) -> Subscription
+    pub(crate) fn on_io<F>(&self, f: F) -> Subscription
     where
         F: 'static + Send + FnMut(IoKind, &str),
     {
