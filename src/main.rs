@@ -31,6 +31,10 @@ async fn main() -> Result<()> {
         LanguageServerProcess::new(binary, ProccessId(0), root, stderr_capture.clone(), None)?;
     let init_params = InitializeParams::default();
 
+    procc
+        .on_notification::<Initialized, _>(|x| println!("On Notification: {:?}", x))
+        .detach();
+    procc.on_notification::<notification::ShowMessage, _>(|x| println!("Show message: {:?}", x));
     let _ = procc.request::<Initialize>(init_params).await.unwrap();
 
     let inited = InitializedParams {};
@@ -42,11 +46,6 @@ async fn main() -> Result<()> {
             register_options: None,
         }],
     };
-
-    procc
-        .on_notification::<Initialized, _>(|x| println!("On Notification: {:?}", x))
-        .detach();
-    procc.on_notification::<notification::ShowMessage, _>(|x| println!("Show message: {:?}", x));
 
     let _ = procc.request::<RegisterCapability>(regis.clone()).await;
     let _ = procc.request::<RegisterCapability>(regis).await;

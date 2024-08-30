@@ -16,6 +16,7 @@ use types::types::{
     NotificationHandler, ProccessId, ResponseHandler, Subscription,
 };
 
+pub mod client;
 pub mod handlers;
 pub mod ioloop;
 pub mod listener;

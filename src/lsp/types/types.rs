@@ -127,3 +127,11 @@ impl Subscription {
         }
     }
 }
+
+pub enum Server {
+    CPP,
+    GO,
+    RUST,
+    PYTHON,
+    TYPESCRIPT,
+}
