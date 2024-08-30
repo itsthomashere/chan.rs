@@ -136,7 +136,6 @@ impl IoLoop {
         let mut content_len_buffer = Vec::new();
 
         while let Some(message) = request_in_rx.recv().await {
-            println!("StdIn got request: {message}");
             log::trace!("Incoming Lsp Request:{message}");
 
             for handler in io_handlers.lock().values_mut() {
@@ -182,7 +181,6 @@ impl IoLoop {
             buff_reader.read_exact(&mut buffer).await?;
 
             if let Ok(message) = std::str::from_utf8(&buffer) {
-                println!("StdOut Got response: {message}");
                 log::trace!("incoming message: {message}");
                 for handler in io_handlers.lock().values_mut() {
                     handler(IoKind::StdOut, message);
@@ -234,7 +232,6 @@ impl IoLoop {
             }
 
             if let Ok(message) = std::str::from_utf8(&buffer) {
-                println!("StdErr: Got: {message}");
                 log::trace!("Incoming Lsp Stderr message: {message}");
                 for handler in io_handlers.lock().values_mut() {
                     handler(IoKind::StdErr, message);

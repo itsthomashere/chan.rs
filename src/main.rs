@@ -10,7 +10,7 @@ use liblspc::{
     LanguageServerProcess,
 };
 use lsp_types::{
-    notification::Initialized,
+    notification::{self, Initialized},
     request::{Initialize, RegisterCapability},
     InitializeParams, InitializedParams, Registration, RegistrationParams,
 };
@@ -44,7 +44,15 @@ async fn main() -> Result<()> {
             register_options: None,
         }],
     };
+
+    procc
+        .on_notification::<Initialized, _>(|x| println!("On Notification: {:?}", x))
+        .detach();
+    procc.on_notification::<notification::ShowMessage, _>(|x| println!("Show message: {:?}", x));
+
+    let _ = procc.request::<RegisterCapability>(regis.clone()).await;
     let registerd = procc.request::<RegisterCapability>(regis).await;
+
     println!("{:?}\n", registerd);
     println!("{:?}\n", stderr_capture.lock().as_slice());
 
