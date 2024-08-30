@@ -1,4 +1,10 @@
-use std::{collections::HashMap, ffi::OsString, path::PathBuf, sync::Arc, time::Duration};
+use std::{
+    collections::HashMap,
+    ffi::OsString,
+    path::PathBuf,
+    sync::{Arc, Weak},
+    time::Duration,
+};
 
 use lsp_types::{CodeActionKind, ServerCapabilities};
 use parking_lot::Mutex;
@@ -102,5 +108,10 @@ pub enum Subscription {
     Notification {
         method: &'static str,
         notification_handlers: Option<Arc<Mutex<HashMap<&'static str, NotificationHandler>>>>,
+    },
+
+    Io {
+        id: i32,
+        io_handlers: Option<Weak<Mutex<HashMap<i32, IoHandler>>>>,
     },
 }
