@@ -18,6 +18,7 @@ use parking_lot::Mutex;
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    simple_logger::init().unwrap();
     let binary = LanguageServerBinary {
         path: PathBuf::from(OsString::from("rust-analyzer")),
         envs: None,
@@ -30,10 +31,7 @@ async fn main() -> Result<()> {
         LanguageServerProcess::new(binary, ProccessId(0), root, stderr_capture.clone(), None)?;
     let init_params = InitializeParams::default();
 
-    let response = procc.request::<Initialize>(init_params).await.unwrap();
-    let response = serde_json::to_string_pretty(&response).unwrap();
-
-    println!("{}\n", response);
+    let _ = procc.request::<Initialize>(init_params).await.unwrap();
 
     let inited = InitializedParams {};
     let _ = procc.notify::<Initialized>(inited).await;
@@ -51,10 +49,7 @@ async fn main() -> Result<()> {
     procc.on_notification::<notification::ShowMessage, _>(|x| println!("Show message: {:?}", x));
 
     let _ = procc.request::<RegisterCapability>(regis.clone()).await;
-    let registerd = procc.request::<RegisterCapability>(regis).await;
-
-    println!("{:?}\n", registerd);
-    println!("{:?}\n", stderr_capture.lock().as_slice());
+    let _ = procc.request::<RegisterCapability>(regis).await;
 
     Ok(())
 }
