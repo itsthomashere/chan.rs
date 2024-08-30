@@ -181,7 +181,7 @@ impl IoLoop {
             buff_reader.read_exact(&mut buffer).await?;
 
             if let Ok(message) = std::str::from_utf8(&buffer) {
-                log::trace!("incoming message: {message}");
+                log::trace!("Incoming LSP message: {message}");
                 for handler in io_handlers.lock().values_mut() {
                     handler(IoKind::StdOut, message);
                 }
