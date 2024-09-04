@@ -32,9 +32,9 @@ async fn main() -> Result<()> {
     let init_params = InitializeParams::default();
 
     procc
-        .on_notification::<Initialized, _>(|x| println!("On Notification: {:?}", x))
+        .on_notification::<Initialized, _>(|x| println!("On Notification: {:?}\n", x))
         .detach();
-    procc.on_notification::<notification::ShowMessage, _>(|x| println!("Show message: {:?}", x));
+    procc.on_notification::<notification::ShowMessage, _>(|x| println!("Show message: {:?}\n", x));
     let _ = procc.request::<Initialize>(init_params).await.unwrap();
 
     let inited = InitializedParams {};
