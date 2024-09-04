@@ -1,29 +1,44 @@
 use std::{
     ffi::OsString,
     path::{Path, PathBuf},
+    sync::Arc,
 };
 
 use anyhow::Result;
-use liblspc::types::types::ProccessId;
-use liblspc::{types::types::LanguageServerBinary, LanguageSeverProcess};
-use lsp_types::{
-    notification::{Initialized, ShowMessage},
-    request, InitializeParams, InitializedParams, Registration, RegistrationParams,
+use liblspc::{
+    types::types::{LanguageServerBinary, ProccessId},
+    LanguageServerProcess,
 };
+use lsp_types::{
+    notification::{self, Initialized},
+    request::{Initialize, RegisterCapability},
+    InitializeParams, InitializedParams, Registration, RegistrationParams,
+};
+use parking_lot::Mutex;
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    simple_logger::init().unwrap();
     let binary = LanguageServerBinary {
         path: PathBuf::from(OsString::from("rust-analyzer")),
         envs: None,
         args: Vec::new(),
     };
     let root = Path::new("/");
+    let stderr_capture: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(Some(String::default())));
 
-    let procc = LanguageSeverProcess::new(binary, root, ProccessId(0));
-    procc.initialize(InitializeParams::default()).await?;
-    println!("working dir: {:?}", procc.working_dir());
-    println!("root path : {:?}", procc.root_path());
+    let procc =
+        LanguageServerProcess::new(binary, ProccessId(0), root, stderr_capture.clone(), None)?;
+    let init_params = InitializeParams::default();
+
+    procc
+        .on_notification::<Initialized, _>(|x| println!("On Notification: {:?}\n", x))
+        .detach();
+    procc.on_notification::<notification::ShowMessage, _>(|x| println!("Show message: {:?}\n", x));
+    let _ = procc.request::<Initialize>(init_params).await.unwrap();
+
+    let inited = InitializedParams {};
+    let _ = procc.notify::<Initialized>(inited).await;
     let regis = RegistrationParams {
         registrations: vec![Registration {
             id: "testing_hehe".to_string(),
@@ -31,12 +46,9 @@ async fn main() -> Result<()> {
             register_options: None,
         }],
     };
-    let inited_params = InitializedParams {};
-    procc.on_notification::<ShowMessage, _>(move |params| {
-        println!("Got notification: {:?}\n", params);
-    })?;
-    procc.notify::<Initialized>(inited_params).await?;
-    let registerd = procc.request::<request::RegisterCapability>(regis).await;
-    println!("{:?}", registerd);
+
+    let _ = procc.request::<RegisterCapability>(regis.clone()).await;
+    let _ = procc.request::<RegisterCapability>(regis).await;
+
     Ok(())
 }
