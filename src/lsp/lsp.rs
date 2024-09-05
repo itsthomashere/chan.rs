@@ -1,3 +1,9 @@
+mod input_handlers;
+mod io_loop;
+mod listener;
+pub mod types;
+pub mod util;
+
 use std::{
     collections::HashMap,
     future::Future,
@@ -6,21 +12,15 @@ use std::{
     sync::Arc,
 };
 
-use ioloop::io_loop::IoLoop;
-use listener::listener::Listener;
+use io_loop::IoLoop;
+use listener::Listener;
 use lsp_types::{notification, request, CodeActionKind, ServerCapabilities};
 use parking_lot::{Mutex, RwLock};
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver};
-use types::types::{
+use types::{
     AdapterServerCapabilities, AnyNotification, IoHandler, IoKind, LanguageServerBinary,
     NotificationHandler, ProccessId, ResponseHandler, Subscription,
 };
-
-pub mod handlers;
-pub mod ioloop;
-pub mod listener;
-pub mod types;
-pub mod util;
 
 pub struct LanguageServerProcess {
     io_loop: Arc<IoLoop>,

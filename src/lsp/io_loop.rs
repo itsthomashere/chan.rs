@@ -14,11 +14,11 @@ use tokio::{
     sync::mpsc::{UnboundedReceiver, UnboundedSender},
 };
 
-use crate::types::types::{LanguageServerBinary, ProccessId};
-use crate::util::util;
+use crate::types::{LanguageServerBinary, ProccessId};
+use crate::util;
 use crate::{
-    handlers::input_handlers::read_headers,
-    types::types::{
+    input_handlers::read_headers,
+    types::{
         AnyNotification, AnyResponse, IoHandler, IoKind, RequestId, ResponseHandler,
         CONTENT_LEN_HEADER,
     },

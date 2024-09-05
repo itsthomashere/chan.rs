@@ -4,7 +4,7 @@ use tokio::{
     process::ChildStdout,
 };
 
-use crate::types::types::HEADER_DELIMITER;
+use crate::types::HEADER_DELIMITER;
 
 pub async fn read_headers(
     reader: &mut BufReader<ChildStdout>,

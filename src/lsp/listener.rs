@@ -11,14 +11,15 @@ use tokio::sync::oneshot;
 
 use tokio::{sync::mpsc::UnboundedReceiver, task::JoinHandle};
 
-use crate::types::types::{
+use crate::types::{
     AnyResponse, IoKind, LspError, LspResult, Notification, Request, Response, Subscription,
     JSON_RPC_VER, LSP_REQUEST_TIMEOUT,
 };
 use crate::{
-    types::types::{AnyNotification, IoHandler, NotificationHandler, RequestId, ResponseHandler},
-    util::util,
+    types::{AnyNotification, IoHandler, NotificationHandler, RequestId, ResponseHandler},
+    util,
 };
+
 pub(crate) struct Listener {
     next_id: AtomicI32,
     request_out_tx: UnboundedSender<String>,
