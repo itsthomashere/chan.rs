@@ -4,6 +4,7 @@ mod listener;
 pub mod types;
 pub mod util;
 pub use lsp_types;
+pub use parking_lot;
 
 use std::{
     collections::HashMap,
