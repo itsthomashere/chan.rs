@@ -3,6 +3,7 @@ mod io_loop;
 mod listener;
 pub mod types;
 pub mod util;
+pub use lsp_types;
 
 use std::{
     collections::HashMap,
