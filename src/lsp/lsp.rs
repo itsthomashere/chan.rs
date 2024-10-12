@@ -33,6 +33,28 @@ pub struct LanguageServerProcess {
 }
 
 impl LanguageServerProcess {
+    /// Start a new language server process
+    /// A process is construct by one io_listener and one listener_loop
+    /// When sending something to the process, the request will be handled by background task
+    /// keeping the process lock-free
+    ///
+    /// # Usage
+    /// ``` rust
+    ///     let binary: LanguageServerBinary = LanguageServerBinary { ... };
+    ///     let root_path = Path::new("your-root");
+    ///     // Stderr capture will take every stderr response receivered
+    ///     // usefull for logging
+    ///     let stderr_capture = Arc::new(Mutex::new(...))
+    ///     let server =
+    ///         LanguageServerProcess::new(binary, ProccessId(0), root_path, stderr_capture, None)?;
+
+    /// ```
+    ///
+    /// * `binary`: LanguageServerBinary that will be used to spawn the process
+    /// * `server_id`: Assigned process id that's free set by the user
+    /// * `root_path`: Root path for the lsp
+    /// * `stderr_capture`: Stderr
+    /// * `code_action_kind`: List of code actions that will be registered during startup
     pub fn new(
         binary: LanguageServerBinary,
         server_id: ProccessId,
@@ -80,6 +102,17 @@ impl LanguageServerProcess {
         })
     }
 
+    /// Send a request to the server and get the response back
+    /// T must be type of lsp_types::request. We had re-exported the module
+    ///
+    /// # Usage
+    /// ```rust
+    ///     use chan_rs::lsp_types::request::Initialize;
+    ///
+    ///     let init_params = IntializeParams::default();
+    ///     let response = server.request::<Initialize>(init_params)?;
+    /// ```
+    /// * `params`: Parameters for the request
     pub async fn request<T: request::Request>(
         &self,
         params: T::Params,
@@ -87,6 +120,18 @@ impl LanguageServerProcess {
         self.listener.request::<T>(params).await
     }
 
+    /// Send a notify to the server, notify requests don't send response back
+    /// T must be type of lsp_types::notification. We had re-exported the module
+    ///
+    /// # Usage
+    /// ```rust
+    ///     use chan_rs::lsp_types::notification::Initialized;
+    ///
+    ///     let initialized = IntializedParams::default();
+    ///     server.notify::<Initialized>(initialized)?;
+    /// ```
+    ///
+    /// * `params`: Parameters for the notification
     pub async fn notify<T: notification::Notification>(
         &self,
         params: T::Params,
@@ -94,6 +139,20 @@ impl LanguageServerProcess {
         self.listener.send_notification::<T>(params).await
     }
 
+    /// Register a handler for one type incoming notification
+    /// You can only have one handler for one type of lsp message at a time
+    /// If you try to register two handler for the same type, the program will panic
+    ///
+    /// # Usage
+    /// Print out parameters of ShowMessage
+    ///
+    /// ```rust
+    ///     server
+    ///         .on_notification::<notification::ShowMessage, _>(|x| println!("Show message: {:?}\n", x))
+    ///         .detach();
+    /// ```
+    ///
+    /// * `f`: handler function
     pub fn on_notification<T: notification::Notification, F>(&self, f: F) -> Subscription
     where
         F: 'static + Send + FnMut(T::Params),
@@ -101,6 +160,11 @@ impl LanguageServerProcess {
         self.listener.on_notification::<T, F>(f)
     }
 
+    /// Register a handler for one type of request
+    /// You can only have one handler for one type of lsp message at a time
+    /// If you try to register two handler for the same type, the program will panic
+    ///
+    /// * `f`: a handler that take in request params and return a future with result
     pub fn on_request<T: request::Request, Fut, F>(&self, f: F) -> Subscription
     where
         Fut: 'static + Future<Output = anyhow::Result<T::Result>> + Send,
