@@ -15,4 +15,4 @@ lsp-types = "0.97.0"
 parking_lot = "0.12.3"
 serde = { version = "1.0.204", features = ["derive"] }
 serde_json = { version = "1.0.120", features = ["raw_value"] }
-tokio = { version = "1.38.1", features = ["full"] }
+tokio = { version = "1.38.1", default-features = false, features = ["sync", "time", "process",  "io-util", "macros", "rt"] }
