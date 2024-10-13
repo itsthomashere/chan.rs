@@ -68,7 +68,7 @@ pub struct LSPNotification<'a, T> {
 /// * `jsonrpc`: jsonrpc version, see [JSON_RPC_VERSION]
 /// * `id`: Request Id, see [RequestId]
 /// * `value`: See [LSPResult]
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct LSPResponse<'a, T> {
     pub jsonrpc: &'a str,
     pub id: RequestId,

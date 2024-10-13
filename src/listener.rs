@@ -1,6 +1,8 @@
 use anyhow::anyhow;
 use anyhow::Context;
+use lsp_types::error_codes;
 use serde_json::Value;
+use std::future::Future;
 use std::future::IntoFuture;
 use std::{
     collections::HashMap,
@@ -18,7 +20,12 @@ use tokio::{
     },
 };
 
+use crate::io::IOKind;
 use crate::utils;
+use crate::utils::Subscription;
+use crate::AnyResponse;
+use crate::LSPError;
+use crate::LSPResponse;
 use crate::LSP_REQUEST_TIMEOUT;
 use crate::{
     io::{IoHandler, NotificationHandler, ResponseHandler},
@@ -181,9 +188,128 @@ impl Listener {
         Ok(())
     }
 
-    pub(crate) fn on_notification(&self) {}
-    pub(crate) fn on_request(&self) {}
-    pub(crate) fn on_io(&self) {}
+    pub(crate) fn on_notification<T: notification::Notification, F>(&self, mut f: F) -> Subscription
+    where
+        T::Params: 'static + Send,
+        F: Send + 'static + FnMut(T::Params),
+    {
+        // Insert get the handler, this should return None
+        let prev_handler = self.notification_handlers.lock().insert(
+            T::METHOD,
+            Box::new(move |_, params| {
+                if let Ok(params) = serde_json::from_value(params) {
+                    f(params)
+                }
+            }),
+        );
+
+        assert!(
+            prev_handler.is_none(),
+            "Multiple handler for {} registered",
+            T::METHOD
+        );
+
+        Subscription::Notification {
+            method: T::METHOD,
+            notification_handlers: Some(self.notification_handlers.clone()),
+        }
+    }
+
+    pub(crate) fn on_request<T: request::Request, F, Fut>(&self, mut f: F) -> Subscription
+    where
+        T::Params: 'static + Send,
+        F: Send + 'static + FnMut(T::Params) -> Fut,
+        Fut: Send + 'static + Future<Output = anyhow::Result<T::Result>>,
+    {
+        let request_tx = self.request_tx.clone();
+
+        let prev_handler = self.notification_handlers.lock().insert(
+            T::METHOD,
+            Box::new(move |id, params| {
+                if let Some(id) = id {
+                    match serde_json::from_value::<T::Params>(params) {
+                        Ok(params) => {
+                            let result = f(params);
+
+                            tokio::spawn({
+                                let request_tx = request_tx.clone();
+                                async move {
+                                    let result = match result.await {
+                                        Ok(result) => LSPResponse {
+                                            jsonrpc: JSON_RPC_VERSION,
+                                            id,
+                                            value: crate::LSPResult::Ok(Some(result)),
+                                        },
+                                        Err(error) => LSPResponse {
+                                            jsonrpc: JSON_RPC_VERSION,
+                                            id,
+                                            value: crate::LSPResult::Err(Some(LSPError {
+                                                message: error.to_string(),
+                                                code: lsp_types::error_codes::REQUEST_FAILED as i32,
+                                                data: None,
+                                            })),
+                                        },
+                                    };
+
+                                    if let Ok(response) = serde_json::to_string(&result) {
+                                        request_tx.send(response).ok();
+                                    }
+                                }
+                            });
+                        }
+                        Err(error) => {
+                            log::error!(
+                                "Failed to deserializing {} LSP request: {:?}",
+                                T::METHOD,
+                                error
+                            );
+                            let response = AnyResponse {
+                                jsonrpc: JSON_RPC_VERSION,
+                                id,
+                                result: None,
+                                error: Some(LSPError {
+                                    message: error.to_string(),
+                                    code: error_codes::UNKNOWN_ERROR_CODE as i32,
+                                    data: None,
+                                }),
+                            };
+
+                            if let Ok(response) = serde_json::to_string(&response) {
+                                request_tx.send(response).ok();
+                            }
+                        }
+                    }
+                }
+            }),
+        );
+
+        assert!(
+            prev_handler.is_none(),
+            "Multiple handler for {} registered",
+            T::METHOD
+        );
+
+        Subscription::Notification {
+            method: T::METHOD,
+            notification_handlers: Some(self.notification_handlers.clone()),
+        }
+    }
+
+    pub(crate) fn on_io<F>(&self, f: F) -> Subscription
+    where
+        F: Send + 'static + FnMut(IOKind, &str),
+    {
+        let id = self
+            .next_id
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+
+        self.io_handlers.lock().insert(id, Box::new(f));
+
+        Subscription::Io {
+            id,
+            io_handlers: Some(Arc::downgrade(&self.io_handlers.clone())),
+        }
+    }
 
     pub(crate) fn kill(&mut self) -> anyhow::Result<()> {
         self.output_task.abort();

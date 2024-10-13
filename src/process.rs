@@ -2,6 +2,7 @@ use std::{
     borrow::BorrowMut,
     collections::HashMap,
     ffi::OsString,
+    future::Future,
     path::{Path, PathBuf},
     sync::Arc,
 };
@@ -11,8 +12,9 @@ use parking_lot::{Mutex, RwLock};
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver};
 
 use crate::{
-    io::{IoHandler, NotificationHandler, ResponseHandler, IO},
+    io::{IOKind, IoHandler, NotificationHandler, ResponseHandler, IO},
     listener::Listener,
+    utils::Subscription,
     AnyNotification,
 };
 
@@ -139,16 +141,28 @@ impl LanguageServer {
         self.listener.send_notification::<T>(params).await
     }
 
-    pub fn on_request(&self) {
-        self.listener.on_request()
+    pub fn on_request<T: request::Request, F, Fut>(&self, f: F) -> Subscription
+    where
+        T::Params: 'static + Send,
+        F: Send + 'static + FnMut(T::Params) -> Fut,
+        Fut: Send + 'static + Future<Output = anyhow::Result<T::Result>>,
+    {
+        self.listener.on_request::<T, F, Fut>(f)
     }
 
-    pub fn on_notification(&self) {
-        self.listener.on_notification()
+    pub fn on_notification<T: notification::Notification, F>(&self, f: F) -> Subscription
+    where
+        T::Params: 'static + Send,
+        F: Send + 'static + FnMut(T::Params),
+    {
+        self.listener.on_notification::<T, F>(f)
     }
 
-    pub fn on_io(&self) {
-        self.listener.on_io()
+    pub fn on_io<F>(&self, f: F) -> Subscription
+    where
+        F: Send + 'static + FnMut(IOKind, &str),
+    {
+        self.listener.on_io::<F>(f)
     }
 
     pub fn server_id(&self) -> i32 {
