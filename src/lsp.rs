@@ -27,6 +27,7 @@ pub(crate) const LSP_REQUEST_TIMEOUT: Duration = Duration::from_secs(5);
 /// Implemetation of LSP Request Id
 /// [See](https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#requestMessage)
 #[derive(Debug, Clone, Deserialize, Serialize, Eq, PartialEq, Hash)]
+#[serde(untagged)]
 pub enum RequestId {
     Int(i32),
     Str(String),

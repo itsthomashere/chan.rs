@@ -161,7 +161,7 @@ impl IO {
             let mut content_len_buffer: Vec<u8> = Vec::new();
 
             while let Some(message) = request_rx.recv().await {
-                log::trace!("IO got request: {}", message);
+                log::trace!("LSP got request: {}", message);
 
                 for handler in io_handlers.lock().values_mut() {
                     handler(IOKind::In, &message);
@@ -212,7 +212,7 @@ impl IO {
 
                 // Check if message is valid utf8
                 if let Ok(message) = std::str::from_utf8(&buffer) {
-                    log::trace!("IO send : {}", message);
+                    log::trace!("LSP send : {}", message);
                     // We got response, execute the io handler
                     for handler in io_handlers.lock().values_mut() {
                         handler(IOKind::Out, message);
@@ -270,7 +270,7 @@ impl IO {
                 }
 
                 if let Ok(message) = std::str::from_utf8(&buffer) {
-                    log::trace!("IO got error: {}", message);
+                    log::trace!("LSP send error: {}", message);
 
                     for handler in io_handlers.lock().values_mut() {
                         handler(IOKind::Err, message);
