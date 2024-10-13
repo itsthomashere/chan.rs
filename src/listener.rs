@@ -20,10 +20,10 @@ use tokio::{
     },
 };
 
-use crate::io::IOKind;
 use crate::utils;
 use crate::utils::Subscription;
 use crate::AnyResponse;
+use crate::IOKind;
 use crate::LSPError;
 use crate::LSPResponse;
 use crate::LSP_REQUEST_TIMEOUT;

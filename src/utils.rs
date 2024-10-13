@@ -9,8 +9,9 @@ use crate::io::{IoHandler, NotificationHandler};
 
 pub(crate) struct Defered<F: FnOnce()>(Option<F>);
 
+#[allow(dead_code)]
 impl<F: FnOnce()> Defered<F> {
-    pub(crate) fn abort(mut self) {
+    pub fn abort(mut self) {
         self.0.take();
     }
 }
@@ -41,7 +42,7 @@ pub enum Subscription {
 
 impl Subscription {
     // Detach the handler from foreground task
-    pub(crate) fn detach(&mut self) {
+    pub fn detach(&mut self) {
         match self {
             Subscription::Notification {
                 notification_handlers,

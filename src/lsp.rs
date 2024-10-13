@@ -123,3 +123,10 @@ pub(crate) struct AnyNotification {
     #[serde(default)]
     pub(crate) params: Option<Value>,
 }
+
+#[derive(Debug, Clone, Copy)]
+pub enum IOKind {
+    In,
+    Out,
+    Err,
+}

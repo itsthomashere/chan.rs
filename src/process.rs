@@ -1,8 +1,8 @@
 use std::{
-    borrow::BorrowMut,
     collections::HashMap,
     ffi::OsString,
     future::Future,
+    ops::DerefMut,
     path::{Path, PathBuf},
     sync::Arc,
 };
@@ -11,8 +11,9 @@ use lsp_types::{notification, request, CodeActionKind, ServerCapabilities};
 use parking_lot::{Mutex, RwLock};
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver};
 
+use crate::IOKind;
 use crate::{
-    io::{IOKind, IoHandler, NotificationHandler, ResponseHandler, IO},
+    io::{IoHandler, NotificationHandler, ResponseHandler, IO},
     listener::Listener,
     utils::Subscription,
     AnyNotification,
@@ -141,6 +142,9 @@ impl LanguageServer {
         self.listener.send_notification::<T>(params).await
     }
 
+    ///
+    /// Register a handler to handle incoming request
+    /// You can only register on handler for one method
     pub fn on_request<T: request::Request, F, Fut>(&self, f: F) -> Subscription
     where
         T::Params: 'static + Send,
@@ -150,6 +154,9 @@ impl LanguageServer {
         self.listener.on_request::<T, F, Fut>(f)
     }
 
+    ///
+    /// Register a handler to handle incoming notification
+    /// You can only register one handler for one method
     pub fn on_notification<T: notification::Notification, F>(&self, f: F) -> Subscription
     where
         T::Params: 'static + Send,
@@ -158,6 +165,9 @@ impl LanguageServer {
         self.listener.on_notification::<T, F>(f)
     }
 
+    /// Register a handler to handle stdio
+    /// You can re-regsiter the handler
+    ///
     pub fn on_io<F>(&self, f: F) -> Subscription
     where
         F: Send + 'static + FnMut(IOKind, &str),
@@ -165,34 +175,44 @@ impl LanguageServer {
         self.listener.on_io::<F>(f)
     }
 
+    /// Get the server id
     pub fn server_id(&self) -> i32 {
         self.io.id()
     }
 
+    /// Root Path of working project
     pub fn root_path(&self) -> &PathBuf {
         self.io.root_path()
     }
 
+    /// Working dir of the workspace
     pub fn working_dir(&self) -> &PathBuf {
         self.io.working_dir()
     }
 
+    /// List of capablilities
     pub fn capabilities(&self) -> ServerCapabilities {
         self.capabilities.read().clone()
     }
 
-    pub fn update_capabilities(&mut self) {}
+    /// Update the server capabilities
+    pub fn update_capabilities(&self, update: impl FnOnce(&mut ServerCapabilities)) {
+        update(self.capabilities.write().deref_mut())
+    }
 
+    /// List code action kinds
     pub fn code_action_kinds(&self) -> Option<Vec<CodeActionKind>> {
         self.code_action_kind.clone()
     }
 
+    /// The server name
     pub fn name(&self) -> &str {
         self.io.name()
     }
 
+    /// Kill the tasks
     pub fn kill(&mut self) -> anyhow::Result<()> {
-        self.io.borrow_mut().kill()?;
+        self.io.kill()?;
         self.listener.kill()?;
         Ok(())
     }

@@ -1,3 +1,4 @@
+use crate::IOKind;
 use std::io::Write;
 use std::path::Path;
 use std::process::Stdio;
@@ -45,13 +46,6 @@ pub async fn read_header(
             return Err(anyhow!("Could not read header, not bytes read"));
         }
     }
-}
-
-#[derive(Debug, Clone, Copy)]
-pub enum IOKind {
-    In,
-    Out,
-    Err,
 }
 
 pub(crate) struct IO {
