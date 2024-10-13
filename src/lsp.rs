@@ -1,5 +1,9 @@
 pub(crate) mod io;
+pub(crate) mod listener;
 pub mod process;
+use std::time::Duration;
+
+pub use lsp_types;
 pub(crate) mod utils;
 use serde::{Deserialize, Serialize};
 use serde_json::{value::RawValue, Value};
@@ -17,6 +21,8 @@ pub(crate) const CONTENT_LEN_HEADER: &str = "Content-Length: ";
 
 // Header and content seperator
 pub(crate) const HEADER_DELIMITER: &[u8; 4] = b"\r\n\r\n";
+
+pub(crate) const LSP_REQUEST_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// Implemetation of LSP Request Id
 /// [See](https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#requestMessage)
@@ -63,20 +69,20 @@ pub struct LSPNotification<'a, T> {
 /// * `value`: See [LSPResult]
 #[derive(Debug, Deserialize, Clone)]
 pub struct LSPResponse<'a, T> {
-    pub jsonrpc: &'static str,
+    pub jsonrpc: &'a str,
     pub id: RequestId,
     #[serde(flatten)]
-    pub value: LSPResult<'a, T>,
+    pub value: LSPResult<T>,
 }
 
 // Result of response message
 /// [Response Message](https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#responseMessage)
 #[derive(Debug, Deserialize, Serialize, Clone)]
-pub enum LSPResult<'a, T> {
+pub enum LSPResult<T> {
     #[serde(rename = "result")]
     Ok(Option<T>),
-    #[serde(borrow, rename = "error")]
-    Err(Option<LSPError<'a>>),
+    #[serde(rename = "error")]
+    Err(Option<LSPError>),
 }
 
 /// Implementation of Response Error
@@ -86,11 +92,10 @@ pub enum LSPResult<'a, T> {
 /// * `code`: Error code
 /// * `data`: LSPAny
 #[derive(Debug, Deserialize, Serialize, Clone)]
-pub struct LSPError<'a> {
+pub struct LSPError {
     pub message: String,
     pub code: i32,
-    #[serde(borrow)]
-    pub data: Option<&'a RawValue>,
+    pub data: Option<Value>,
 }
 
 /// Serialize any response we got back from the server
@@ -106,7 +111,7 @@ pub(crate) struct AnyResponse<'a> {
     #[serde(borrow)]
     pub(crate) result: Option<&'a RawValue>,
     #[serde(default)]
-    pub(crate) error: Option<LSPError<'a>>,
+    pub(crate) error: Option<LSPError>,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
