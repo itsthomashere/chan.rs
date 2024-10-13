@@ -1,84 +1,98 @@
-use anyhow::{anyhow, Context};
+use anyhow::anyhow;
+use anyhow::Context;
+use lsp_types::error_codes;
+use serde_json::Value;
+use std::future::Future;
+use std::future::IntoFuture;
+use std::{
+    collections::HashMap,
+    sync::{atomic::AtomicI32, Arc},
+};
+use tokio::task::JoinHandle;
+
 use lsp_types::{notification, request};
 use parking_lot::Mutex;
-use serde_json::Value;
-use std::future::{Future, IntoFuture};
-use std::sync::Arc;
-use std::{collections::HashMap, sync::atomic::AtomicI32};
-use tokio::select;
-use tokio::sync::mpsc::UnboundedSender;
-use tokio::sync::oneshot;
-
-use tokio::{sync::mpsc::UnboundedReceiver, task::JoinHandle};
-
-use crate::types::{
-    AnyResponse, IoKind, LspError, LspResult, Notification, Request, Response, Subscription,
-    JSON_RPC_VER, LSP_REQUEST_TIMEOUT,
+use tokio::{
+    select,
+    sync::{
+        mpsc::{UnboundedReceiver, UnboundedSender},
+        oneshot,
+    },
 };
+
+use crate::utils;
+use crate::utils::Subscription;
+use crate::AnyResponse;
+use crate::IOKind;
+use crate::LSPError;
+use crate::LSPResponse;
+use crate::LSP_REQUEST_TIMEOUT;
 use crate::{
-    types::{AnyNotification, IoHandler, NotificationHandler, RequestId, ResponseHandler},
-    util,
+    io::{IoHandler, NotificationHandler, ResponseHandler},
+    AnyNotification, LSPNotification, LSPRequest, RequestId, JSON_RPC_VERSION,
 };
 
 pub(crate) struct Listener {
     next_id: AtomicI32,
-    request_out_tx: UnboundedSender<String>,
+    request_tx: UnboundedSender<String>,
+    response_handlers: Arc<Mutex<Option<HashMap<RequestId, ResponseHandler>>>>,
     io_handlers: Arc<Mutex<HashMap<i32, IoHandler>>>,
     notification_handlers: Arc<Mutex<HashMap<&'static str, NotificationHandler>>>,
-    response_handlers: Arc<Mutex<Option<HashMap<RequestId, ResponseHandler>>>>,
-    output_tasks: JoinHandle<anyhow::Result<()>>,
+    output_task: JoinHandle<anyhow::Result<()>>,
 }
 
 impl Listener {
     pub(crate) fn new(
-        io_handlers: Arc<Mutex<HashMap<i32, IoHandler>>>,
-        response_handlers: Arc<Mutex<Option<HashMap<RequestId, ResponseHandler>>>>,
+        notification_rx: UnboundedReceiver<AnyNotification>,
         notification_handlers: Arc<Mutex<HashMap<&'static str, NotificationHandler>>>,
-        notification_channel_rx: UnboundedReceiver<AnyNotification>,
-        request_out_tx: UnboundedSender<String>,
+        response_handlers: Arc<Mutex<Option<HashMap<RequestId, ResponseHandler>>>>,
+        io_handlers: Arc<Mutex<HashMap<i32, IoHandler>>>,
+        request_tx: UnboundedSender<String>,
     ) -> anyhow::Result<Self> {
-        let res_handler = response_handlers.clone();
-        let noti_handler = notification_handlers.clone();
-        let output_tasks = tokio::spawn(async move {
-            Self::handle_output(noti_handler, res_handler, notification_channel_rx).await
-        });
+        let output_task = Self::handle_output(
+            notification_handlers.clone(),
+            response_handlers.clone(),
+            notification_rx,
+        );
 
         Ok(Self {
-            output_tasks,
             next_id: Default::default(),
-            request_out_tx,
-            io_handlers,
+            request_tx,
             response_handlers,
+            io_handlers,
             notification_handlers,
+            output_task,
         })
     }
 
-    async fn handle_output(
+    fn handle_output(
         notification_handlers: Arc<Mutex<HashMap<&'static str, NotificationHandler>>>,
         response_handlers: Arc<Mutex<Option<HashMap<RequestId, ResponseHandler>>>>,
-        mut notification_channel_rx: UnboundedReceiver<AnyNotification>,
-    ) -> anyhow::Result<()> {
-        let _clear_response_handlers = util::defer({
-            let response_handlers = response_handlers.clone();
-            move || {
-                response_handlers.lock().take();
-            }
-        });
-
-        while let Some(message) = notification_channel_rx.recv().await {
-            {
-                let mut notification_handlers = notification_handlers.lock();
-                if let Some(handler) = notification_handlers.get_mut(message.method.as_str()) {
-                    handler(message.id, message.params.unwrap_or(Value::Null));
-                } else {
-                    drop(notification_handlers);
+        mut notification_rx: UnboundedReceiver<AnyNotification>,
+    ) -> JoinHandle<anyhow::Result<()>> {
+        tokio::spawn(async move {
+            let _clear_response_handlers = utils::defer({
+                let response_handlers = response_handlers.clone();
+                move || {
+                    response_handlers.lock().take();
                 }
+            });
+
+            while let Some(message) = notification_rx.recv().await {
+                {
+                    let mut notification_handlers = notification_handlers.lock();
+                    if let Some(handler) = notification_handlers.get_mut(message.method.as_str()) {
+                        handler(message.id, message.params.unwrap_or(Value::Null));
+                    } else {
+                        drop(notification_handlers);
+                    }
+                }
+
+                tokio::task::yield_now().await;
             }
 
-            tokio::task::yield_now().await;
-        }
-
-        Ok(())
+            Ok(())
+        })
     }
 
     pub(crate) async fn request<T: request::Request>(
@@ -89,8 +103,8 @@ impl Listener {
             .next_id
             .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
 
-        let message = serde_json::to_string(&Request {
-            jsonrpc: JSON_RPC_VER,
+        let message = serde_json::to_string(&LSPRequest {
+            jsonrpc: JSON_RPC_VERSION,
             id: RequestId::Int(id),
             method: T::METHOD,
             params,
@@ -126,7 +140,7 @@ impl Listener {
                 )
             });
 
-        let request_out_rx = &self.request_out_tx.clone();
+        let request_out_rx = &self.request_tx.clone();
         let send = request_out_rx
             .send(message)
             .context("Failed to write to LSP stdin");
@@ -162,24 +176,52 @@ impl Listener {
         &self,
         params: T::Params,
     ) -> anyhow::Result<()> {
-        let message = serde_json::to_string(&Notification {
-            jsonrpc: JSON_RPC_VER,
+        let message = serde_json::to_string(&LSPNotification {
+            jsonrpc: JSON_RPC_VERSION,
             method: T::METHOD,
             params,
         })
         .unwrap();
 
-        self.request_out_tx.send(message)?;
+        self.request_tx.send(message)?;
 
         Ok(())
     }
 
-    pub(crate) fn on_request<T: request::Request, Fut, F>(&self, mut f: F) -> Subscription
+    pub(crate) fn on_notification<T: notification::Notification, F>(&self, mut f: F) -> Subscription
     where
-        Fut: 'static + Future<Output = anyhow::Result<T::Result>> + Send,
-        F: 'static + Send + FnMut(T::Params) -> Fut + Send,
+        T::Params: 'static + Send,
+        F: Send + 'static + FnMut(T::Params),
     {
-        let request_out_tx = self.request_out_tx.clone();
+        // Insert get the handler, this should return None
+        let prev_handler = self.notification_handlers.lock().insert(
+            T::METHOD,
+            Box::new(move |_, params| {
+                if let Ok(params) = serde_json::from_value(params) {
+                    f(params)
+                }
+            }),
+        );
+
+        assert!(
+            prev_handler.is_none(),
+            "Multiple handler for {} registered",
+            T::METHOD
+        );
+
+        Subscription::Notification {
+            method: T::METHOD,
+            notification_handlers: Some(self.notification_handlers.clone()),
+        }
+    }
+
+    pub(crate) fn on_request<T: request::Request, F, Fut>(&self, mut f: F) -> Subscription
+    where
+        T::Params: 'static + Send,
+        F: Send + 'static + FnMut(T::Params) -> Fut,
+        Fut: Send + 'static + Future<Output = anyhow::Result<T::Result>>,
+    {
+        let request_tx = self.request_tx.clone();
 
         let prev_handler = self.notification_handlers.lock().insert(
             T::METHOD,
@@ -187,47 +229,53 @@ impl Listener {
                 if let Some(id) = id {
                     match serde_json::from_value::<T::Params>(params) {
                         Ok(params) => {
-                            let response = f(params);
+                            let result = f(params);
 
                             tokio::spawn({
-                                let request_out_tx = request_out_tx.clone();
+                                let request_tx = request_tx.clone();
                                 async move {
-                                    let response = match response.await {
-                                        Ok(result) => Response {
-                                            jsonrpc: JSON_RPC_VER,
+                                    let result = match result.await {
+                                        Ok(result) => LSPResponse {
+                                            jsonrpc: JSON_RPC_VERSION,
                                             id,
-                                            value: LspResult::Ok(Some(result)),
+                                            value: crate::LSPResult::Ok(Some(result)),
                                         },
-                                        Err(error) => Response {
-                                            jsonrpc: JSON_RPC_VER,
+                                        Err(error) => LSPResponse {
+                                            jsonrpc: JSON_RPC_VERSION,
                                             id,
-                                            value: LspResult::Error(Some(LspError {
+                                            value: crate::LSPResult::Err(Some(LSPError {
                                                 message: error.to_string(),
+                                                code: lsp_types::error_codes::REQUEST_FAILED as i32,
+                                                data: None,
                                             })),
                                         },
                                     };
-                                    if let Ok(response) = serde_json::to_string(&response) {
-                                        request_out_tx.send(response).ok();
+
+                                    if let Ok(response) = serde_json::to_string(&result) {
+                                        request_tx.send(response).ok();
                                     }
                                 }
                             });
                         }
                         Err(error) => {
                             log::error!(
-                                "Error deserializing {} lsp request: {:?}",
+                                "Failed to deserializing {} LSP request: {:?}",
                                 T::METHOD,
                                 error
                             );
                             let response = AnyResponse {
-                                jsonrpc: JSON_RPC_VER,
+                                jsonrpc: JSON_RPC_VERSION,
                                 id,
-                                error: Some(LspError {
-                                    message: error.to_string(),
-                                }),
                                 result: None,
+                                error: Some(LSPError {
+                                    message: error.to_string(),
+                                    code: error_codes::UNKNOWN_ERROR_CODE as i32,
+                                    data: None,
+                                }),
                             };
+
                             if let Ok(response) = serde_json::to_string(&response) {
-                                request_out_tx.send(response).ok();
+                                request_tx.send(response).ok();
                             }
                         }
                     }
@@ -237,7 +285,8 @@ impl Listener {
 
         assert!(
             prev_handler.is_none(),
-            "registered multiple handlers for the same lsp method"
+            "Multiple handler for {} registered",
+            T::METHOD
         );
 
         Subscription::Notification {
@@ -248,7 +297,7 @@ impl Listener {
 
     pub(crate) fn on_io<F>(&self, f: F) -> Subscription
     where
-        F: 'static + Send + FnMut(IoKind, &str),
+        F: Send + 'static + FnMut(IOKind, &str),
     {
         let id = self
             .next_id
@@ -262,50 +311,12 @@ impl Listener {
         }
     }
 
-    pub(crate) fn on_notification<T: notification::Notification, F>(&self, mut f: F) -> Subscription
-    where
-        F: 'static + Send + FnMut(T::Params),
-    {
-        let prev_handler = self.notification_handlers.lock().insert(
-            T::METHOD,
-            Box::new(move |_, params| {
-                if let Ok(params) = serde_json::from_value(params) {
-                    f(params)
-                }
-            }),
-        );
-        assert!(
-            prev_handler.is_none(),
-            "Register multiple handle for the same notification method"
-        );
-
-        Subscription::Notification {
-            method: T::METHOD,
-            notification_handlers: Some(self.notification_handlers.clone()),
-        }
-    }
-
-    pub(crate) fn remove_notification_handler<T: notification::Notification>(&self) {
-        self.notification_handlers.lock().remove(T::METHOD);
-    }
-
-    pub(crate) fn remove_request_handler<T: request::Request>(&self) {
-        self.notification_handlers.lock().remove(T::METHOD);
-    }
-
-    pub(crate) fn has_notification_handler<T: notification::Notification>(&self) -> bool {
-        self.notification_handlers.lock().contains_key(T::METHOD)
-    }
-
-    pub(crate) fn has_request_handler<T: request::Request>(&self) -> bool {
-        self.notification_handlers.lock().contains_key(T::METHOD)
-    }
-
-    pub(crate) fn kill(&self) -> anyhow::Result<()> {
-        self.output_tasks.abort();
+    pub(crate) fn kill(&mut self) -> anyhow::Result<()> {
+        self.output_task.abort();
+        drop(self.io_handlers.lock());
         drop(self.notification_handlers.lock());
         drop(self.response_handlers.lock());
-        drop(self.io_handlers.lock());
+
         Ok(())
     }
 }
