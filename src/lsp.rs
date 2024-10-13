@@ -1,5 +1,8 @@
+pub(crate) mod io;
+pub mod process;
+pub(crate) mod utils;
 use serde::{Deserialize, Serialize};
-use serde_json::value::RawValue;
+use serde_json::{value::RawValue, Value};
 
 /// The base Language Server Protocol consists of content part and header part
 /// Header have 2 fields: Content-Length and Content-Type( Optional)
@@ -17,7 +20,7 @@ pub(crate) const HEADER_DELIMITER: &[u8; 4] = b"\r\n\r\n";
 
 /// Implemetation of LSP Request Id
 /// [See](https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#requestMessage)
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, Eq, PartialEq, Hash)]
 pub enum RequestId {
     Int(i32),
     Str(String),
@@ -98,10 +101,19 @@ pub struct LSPError<'a> {
 /// * `error`: response error field
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub(crate) struct AnyResponse<'a> {
-    jsonrpc: &'a str,
-    id: RequestId,
+    pub(crate) jsonrpc: &'a str,
+    pub(crate) id: RequestId,
     #[serde(borrow)]
-    result: Option<&'a RawValue>,
+    pub(crate) result: Option<&'a RawValue>,
     #[serde(default)]
-    error: Option<LSPError<'a>>,
+    pub(crate) error: Option<LSPError<'a>>,
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub(crate) struct AnyNotification {
+    pub(crate) method: String,
+    #[serde(default)]
+    pub(crate) id: Option<RequestId>,
+    #[serde(default)]
+    pub(crate) params: Option<Value>,
 }
