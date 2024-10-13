@@ -302,7 +302,7 @@ impl IO {
 
     pub(crate) fn kill(&mut self) -> anyhow::Result<()> {
         self.stdin_task.abort();
-        self.stdin_task.abort();
+        self.stdout_task.abort();
         self.stderr_task.abort();
 
         self.process.lock().start_kill()?;
