@@ -6,7 +6,7 @@ description = "Efficiently Interact with an LSP process"
 license-file = "LICENSE-GPL"
 
 [lib]
-path= "src/lsp/lsp.rs"
+path= "src/lsp.rs"
 doctest= false
 [dependencies]
 anyhow = "1.0.86"
