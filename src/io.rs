@@ -155,20 +155,23 @@ impl IO {
             let mut content_len_buffer: Vec<u8> = Vec::new();
 
             while let Some(message) = request_rx.recv().await {
-                log::trace!("LSP got request: {}", message);
+                {
+                    log::trace!("LSP got request: {}", message);
 
-                for handler in io_handlers.lock().values_mut() {
-                    handler(IOKind::In, &message);
+                    for handler in io_handlers.lock().values_mut() {
+                        handler(IOKind::In, &message);
+                    }
+
+                    content_len_buffer.clear();
+
+                    write!(content_len_buffer, "{}", message.len())?;
+                    buff_writer.write_all(CONTENT_LEN_HEADER.as_bytes()).await?;
+                    buff_writer.write_all(&content_len_buffer).await?;
+                    buff_writer.write_all(HEADER_DELIMITER).await?;
+                    buff_writer.write_all(message.as_bytes()).await?;
+                    buff_writer.flush().await?;
                 }
-
-                content_len_buffer.clear();
-
-                write!(content_len_buffer, "{}", message.len())?;
-                buff_writer.write_all(CONTENT_LEN_HEADER.as_bytes()).await?;
-                buff_writer.write_all(&content_len_buffer).await?;
-                buff_writer.write_all(HEADER_DELIMITER).await?;
-                buff_writer.write_all(message.as_bytes()).await?;
-                buff_writer.flush().await?;
+                tokio::task::yield_now().await;
             }
 
             drop(output_done);
@@ -274,6 +277,7 @@ impl IO {
                         stderr.push_str(message)
                     }
                 }
+                tokio::task::yield_now().await;
             }
         })
     }
