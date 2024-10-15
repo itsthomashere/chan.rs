@@ -1,6 +1,7 @@
 use anyhow::anyhow;
 use anyhow::Context;
 use lsp_types::error_codes;
+use serde::Serialize;
 use serde_json::Value;
 use std::future::Future;
 use std::future::IntoFuture;
@@ -215,11 +216,12 @@ impl Listener {
         }
     }
 
-    pub(crate) fn on_request<T: request::Request, F, Fut>(&self, mut f: F) -> Subscription
+    pub(crate) fn on_request<T: request::Request, F, Fut, Res>(&self, mut f: F) -> Subscription
     where
         T::Params: 'static + Send,
         F: Send + 'static + FnMut(T::Params) -> Fut,
-        Fut: Send + 'static + Future<Output = anyhow::Result<T::Result>>,
+        Fut: Send + 'static + Future<Output = anyhow::Result<Res>>,
+        Res: Serialize,
     {
         let request_tx = self.request_tx.clone();
 

@@ -9,6 +9,7 @@ use std::{
 
 use lsp_types::{notification, request, CodeActionKind, ServerCapabilities};
 use parking_lot::{Mutex, RwLock};
+use serde::Serialize;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver};
 
 use crate::IOKind;
@@ -145,13 +146,14 @@ impl LanguageServer {
     ///
     /// Register a handler to handle incoming request
     /// You can only register on handler for one method
-    pub fn on_request<T: request::Request, F, Fut>(&self, f: F) -> Subscription
+    pub fn on_request<T: request::Request, F, Fut, Res>(&self, f: F) -> Subscription
     where
         T::Params: 'static + Send,
         F: Send + 'static + FnMut(T::Params) -> Fut,
-        Fut: Send + 'static + Future<Output = anyhow::Result<T::Result>>,
+        Fut: Send + 'static + Future<Output = anyhow::Result<Res>>,
+        Res: Serialize,
     {
-        self.listener.on_request::<T, F, Fut>(f)
+        self.listener.on_request::<T, F, Fut, Res>(f)
     }
 
     ///
