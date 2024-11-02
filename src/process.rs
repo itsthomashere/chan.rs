@@ -143,9 +143,11 @@ impl LanguageServer {
         self.listener.send_notification::<T>(params).await
     }
 
-    ///
-    /// Register a handler to handle incoming request
-    /// You can only register on handler for one method
+    /// Most of the request types are straightforward enough, you send request and then get the response back, and you're done.
+    /// But some of them like [workspace/willCreateFiles] have their associate notification method eg.[workspace/didCreateFiles]
+    /// For those request, you can register a handler that automatically send the notification.
+    /// You can only register on handler per method. If you register more than one, the program
+    /// will panic
     pub fn on_request<T: request::Request, F, Fut, Res>(&self, f: F) -> Subscription
     where
         T::Params: 'static + Send,
@@ -156,7 +158,6 @@ impl LanguageServer {
         self.listener.on_request::<T, F, Fut, Res>(f)
     }
 
-    ///
     /// Register a handler to handle incoming notification
     /// You can only register one handler for one method
     pub fn on_notification<T: notification::Notification, F>(&self, f: F) -> Subscription
@@ -167,9 +168,8 @@ impl LanguageServer {
         self.listener.on_notification::<T, F>(f)
     }
 
-    /// Register a handler to handle stdio
+    /// Register a handler to the process's io task
     /// You can re-regsiter the handler
-    ///
     pub fn on_io<F>(&self, f: F) -> Subscription
     where
         F: Send + 'static + FnMut(IOKind, &str),
